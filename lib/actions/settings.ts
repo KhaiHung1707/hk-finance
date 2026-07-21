@@ -1,12 +1,14 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { nonNegative, guard } from "@/lib/validate";
 
 function rev() {
   revalidatePath("/settings");
   revalidatePath("/assets");
   revalidatePath("/upwork");
   revalidatePath("/projects");
+  revalidatePath("/forecast");
   revalidatePath("/");
 }
 
@@ -43,4 +45,30 @@ export async function setAllocationTargets(targets: { cash: number; gold: number
   if (error) return { ok: false, error: error.message };
   rev();
   return { ok: true };
+}
+
+/**
+ * Cập nhật một field kế hoạch trong settings.forecast (Forecast §2 Writes):
+ * - field = tên source (plan_income_monthly[source]) hoặc "__expense__" (plan_expense_monthly).
+ * - Đọc-sửa-ghi jsonb: set value mới và CLEAR cờ assumption của đúng field đó.
+ */
+export async function setForecastPlanValue(field: string, value: number) {
+  return guard(async () => {
+    const v = Math.round(nonNegative(value, "Giá trị"));
+    const sb = await createClient();
+    const { data } = await sb.from("settings").select("value").eq("key", "forecast").maybeSingle();
+    const forecast: any = data?.value ?? {};
+
+    if (field === "__expense__") {
+      forecast.plan_expense_monthly = { value: v, assumption: false };
+    } else {
+      forecast.plan_income_monthly = forecast.plan_income_monthly ?? {};
+      forecast.plan_income_monthly[field] = { value: v, assumption: false };
+    }
+
+    const { error } = await sb.rpc("set_setting", { p_key: "forecast", p_value: forecast });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
 }

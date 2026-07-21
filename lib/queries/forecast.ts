@@ -9,6 +9,13 @@ export type ForecastParams = {
   groupReturnsAnnual: { cash: number; deposit: number; gold: number; stock: number };
   horizonOptions: number[];
   receivablesLandFirstMonth: boolean;
+  houseGoal: { down_payment: number; target_year: number };
+  // cờ "ước lượng" cho từng field editable — dùng để render chip + biết field nào là giả định.
+  assumptions: {
+    planIncome: Record<string, boolean>;
+    planExpense: boolean;
+    groupReturns: boolean;
+  };
 };
 
 export type ForecastStart = {
@@ -21,17 +28,26 @@ export type ForecastStart = {
   baselineMonthKey: string;
 };
 
+export type ForecastSnapshot = { month_key: string; total: number };
+
 export async function getForecastParams(): Promise<ForecastParams> {
   const sb = await createClient();
-  const { data } = await sb.from("settings").select("value").eq("key", "forecast").maybeSingle();
-  const f = (data?.value as any) ?? {};
+  const [{ data: fRow }, { data: hRow }] = await Promise.all([
+    sb.from("settings").select("value").eq("key", "forecast").maybeSingle(),
+    sb.from("settings").select("value").eq("key", "house_goal").maybeSingle(),
+  ]);
+  const f = (fRow?.value as any) ?? {};
+  const h = (hRow?.value as any) ?? {};
 
-  // plan_income_monthly: mỗi source có dạng { value, assumption } → lấy value.
+  // plan_income_monthly: mỗi source có dạng { value, assumption } → lấy value + cờ.
   const planIncome: Record<string, number> = {};
+  const planIncomeAssumption: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(f.plan_income_monthly ?? {})) {
     planIncome[k] = Number((v as any)?.value ?? v ?? 0);
+    planIncomeAssumption[k] = Boolean((v as any)?.assumption);
   }
   const planExpense = Number(f.plan_expense_monthly?.value ?? f.plan_expense_monthly ?? 0);
+  const planExpenseAssumption = Boolean(f.plan_expense_monthly?.assumption);
 
   const scenarios: ForecastParams["scenarios"] = {};
   for (const [k, v] of Object.entries(f.scenarios ?? {})) {
@@ -54,6 +70,15 @@ export async function getForecastParams(): Promise<ForecastParams> {
     },
     horizonOptions: Array.isArray(f.horizon_months_options) ? f.horizon_months_options : [1, 6, 12],
     receivablesLandFirstMonth: f.receivables_land_in_first_month !== false,
+    houseGoal: {
+      down_payment: Number(h.down_payment ?? 0),
+      target_year: Number(h.target_year ?? 0),
+    },
+    assumptions: {
+      planIncome: planIncomeAssumption,
+      planExpense: planExpenseAssumption,
+      groupReturns: Boolean(gr.assumption),
+    },
   };
 }
 
@@ -73,4 +98,14 @@ export async function getForecastStart(): Promise<ForecastStart> {
     receivablesFirstMonth: recv,
     baselineMonthKey,
   };
+}
+
+/** net_worth_snapshots (month_key + total) — overlay actual vs forecast. Có thể rỗng. */
+export async function getForecastSnapshots(): Promise<ForecastSnapshot[]> {
+  const sb = await createClient();
+  const { data } = await sb
+    .from("net_worth_snapshots")
+    .select("month_key, total")
+    .order("month_key");
+  return (data ?? []).map((r) => ({ month_key: r.month_key, total: Number(r.total) }));
 }

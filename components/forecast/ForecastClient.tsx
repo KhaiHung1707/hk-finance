@@ -1,10 +1,11 @@
 "use client";
 import { useMemo, useState } from "react";
-import { fmt, full, pct } from "@/lib/format";
+import { fmt, full } from "@/lib/format";
 import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { runForecast } from "@/lib/forecast";
-import type { ForecastParams, ForecastStart } from "@/lib/queries/forecast";
+import { setForecastPlanValue } from "@/lib/actions/settings";
+import type { ForecastParams, ForecastStart, ForecastSnapshot } from "@/lib/queries/forecast";
 
 function srcColor(name: string, idx: number): string {
   return sourceColor[name] ?? chartPalette[idx % chartPalette.length];
@@ -28,9 +29,11 @@ function Spark({ series, color }: { series: number[]; color: string }) {
 export function ForecastClient({
   params,
   start,
+  snapshots,
 }: {
   params: ForecastParams;
   start: ForecastStart;
+  snapshots: ForecastSnapshot[];
 }) {
   const scenarioKeys = Object.keys(params.scenarios);
   const [scenario, setScenario] = useState(scenarioKeys.includes("base") ? "base" : scenarioKeys[0]);
@@ -38,25 +41,66 @@ export function ForecastClient({
     params.horizonOptions.includes(12) ? 12 : params.horizonOptions[params.horizonOptions.length - 1]
   );
 
-  const r = useMemo(() => runForecast(params, start, scenario, horizon), [params, start, scenario, horizon]);
+  // Optimistic overrides cho plan income/expense (chỉnh tại chỗ, recalc local ngay).
+  const [planOverride, setPlanOverride] = useState<Record<string, number>>({});
+  const [expenseOverride, setExpenseOverride] = useState<number | null>(null);
+  const [showActual, setShowActual] = useState(true);
 
-  // chart geometry (viewBox 620×200)
+  // params hiệu lực = params gốc + override (chưa cần đợi network).
+  const effectiveParams: ForecastParams = useMemo(() => {
+    const planIncome = { ...params.planIncomeMonthly };
+    for (const [k, v] of Object.entries(planOverride)) planIncome[k] = v;
+    return {
+      ...params,
+      planIncomeMonthly: planIncome,
+      planExpenseMonthly: expenseOverride ?? params.planExpenseMonthly,
+    };
+  }, [params, planOverride, expenseOverride]);
+
+  const r = useMemo(
+    () => runForecast(effectiveParams, start, scenario, horizon),
+    [effectiveParams, start, scenario, horizon]
+  );
+
+  // ---- chart geometry (viewBox 620×200) ----
   const W = 620;
   const H = 200;
-  const min = r.startTotal;
-  const max = r.endTotal || r.startTotal + 1;
+  // trục Y bao trùm cả đường headline, mục tiêu nhà, và snapshot (nếu vẽ).
+  const snapInRange = snapshots.filter((s) => r.monthKeys.includes(s.month_key));
+  const yVals = [
+    ...r.nwSeries,
+    ...(r.goalTarget > 0 ? [r.goalTarget] : []),
+    ...(showActual ? snapInRange.map((s) => s.total) : []),
+  ];
+  const min = Math.min(...yVals);
+  const max = Math.max(...yVals) || min + 1;
   const X = (i: number) => 46 + (i / horizon) * (W - 54);
   const Y = (v: number) => H - 10 - ((v - min) / (max - min || 1)) * (H - 26);
   const line = r.nwSeries.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
   const area = `46,${H - 10} ${line} ${W},${H - 10}`;
   const tickIdx = [...new Set([0, Math.round(horizon / 3), Math.round((2 * horizon) / 3), horizon])];
-
   const maxIncome = Math.max(...r.months.map((m) => m.income), 1);
+
+  // receivables landing tháng 1 (index 1 trong series)
+  const showReceivables = params.receivablesLandFirstMonth && start.receivablesFirstMonth > 0 && horizon >= 1;
+
+  // snapshot points + deviation (|actual − base| / base > 10%)
+  const snapPoints = showActual
+    ? snapInRange.map((s) => {
+        const idx = r.monthKeys.indexOf(s.month_key);
+        const base = r.nwSeries[idx];
+        const deviation = base > 0 ? Math.abs(s.total - base) / base : 0;
+        return { idx, total: s.total, deviates: deviation > 0.1, monthKey: s.month_key };
+      })
+    : [];
+
+  // goal reached marker index
+  const goalIdx = r.goalReachedAt ? r.monthKeys.indexOf(r.goalReachedAt) : -1;
 
   const scenarioLabel = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);
   const pill = (active: boolean) =>
     `rounded-full px-[14px] py-[7px] text-[12px] font-bold cursor-pointer border-0 ${
-      active ? "bg-white text-primary" : "bg-transparent text-[#BCD8CC] hover:text-white"
+      active ? "bg-white text-primary" : "bg-transparent text-white/85 hover:text-white"
     }`;
 
   return (
@@ -103,19 +147,41 @@ export function ForecastClient({
           hint={`Thu ${full(r.totalIncome)} · chi ${full(r.totalExpense)} · net ${full(r.totalIncome - r.totalExpense)}`}
         />
         <SummaryCard
-          icon="ph-duotone ph-chart-line-up"
-          iconBg="#DFF2E7"
-          iconFg="#1F7A5C"
-          label="Investment gain"
-          value={`+${fmt(r.investGain)}`}
-          hint={`Lãi tài sản ${full(r.investGain)} qua ${horizon} tháng`}
-          valueColor="#1F7A5C"
+          icon="ph-duotone ph-house-line"
+          iconBg={r.goalReachedAt ? "#DFF2E7" : "#FBF0DC"}
+          iconFg={r.goalReachedAt ? "#1F7A5C" : "#A5731F"}
+          label="Mục tiêu nhà"
+          value={r.goalTarget > 0 ? fmt(r.goalTarget) : "—"}
+          hint={
+            r.goalTarget <= 0
+              ? "Chưa đặt mục tiêu (Settings → house_goal)"
+              : r.goalReachedAt
+                ? `Đạt mục tiêu ~ ${r.goalReachedAt}`
+                : `Chưa đạt trong ${horizon} tháng tới`
+          }
+          valueColor={r.goalReachedAt ? "#1F7A5C" : undefined}
         />
       </div>
 
       {/* Net-worth curve */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
-        <div className="text-[15px] font-bold mb-3">Net-worth projection — {scenarioLabel(scenario)}</div>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="text-[15px] font-bold">Net-worth projection — {scenarioLabel(scenario)}</div>
+          <div className="flex items-center gap-3 text-[11px] text-muted">
+            {r.goalTarget > 0 && (
+              <span className="flex items-center gap-[5px]">
+                <span className="w-[14px] h-0 border-t-2 border-dashed" style={{ borderColor: "#A5731F" }} />
+                Mục tiêu {fmt(r.goalTarget)}
+              </span>
+            )}
+            {snapInRange.length > 0 && (
+              <label className="flex items-center gap-[5px] cursor-pointer select-none">
+                <input type="checkbox" checked={showActual} onChange={(e) => setShowActual(e.target.checked)} />
+                Số thực tế (snapshot)
+              </label>
+            )}
+          </div>
+        </div>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }}>
           {[0, 1 / 3, 2 / 3, 1].map((t, i) => {
             const v = min + (max - min) * t;
@@ -129,9 +195,56 @@ export function ForecastClient({
             );
           })}
           <polygon points={area} fill="#EAF4EE" />
+
+          {/* Đường mục tiêu nhà */}
+          {r.goalTarget > 0 && r.goalTarget >= min && r.goalTarget <= max && (
+            <>
+              <line x1={46} y1={Y(r.goalTarget)} x2={W} y2={Y(r.goalTarget)} stroke="#A5731F" strokeWidth={1.5} strokeDasharray="5 4" />
+              <text x={W - 2} y={Y(r.goalTarget) - 4} fontSize={9} fill="#A5731F" fontWeight={700} textAnchor="end">
+                Mục tiêu
+              </text>
+            </>
+          )}
+
           <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Receivables marker tháng 1 */}
+          {showReceivables && (
+            <g>
+              <circle cx={X(1)} cy={Y(r.nwSeries[1])} r={4.5} fill="#E8C97A" stroke="#FFFFFF" strokeWidth={2} />
+              <text x={X(1)} y={Y(r.nwSeries[1]) - 8} fontSize={8.5} fill="#A5731F" fontWeight={700} textAnchor="middle">
+                +{fmt(start.receivablesFirstMonth)} thu về
+              </text>
+            </g>
+          )}
+
+          {/* Snapshot overlay (actual) */}
+          {snapPoints.map((p) => (
+            <g key={`snap${p.idx}`}>
+              <circle
+                cx={X(p.idx)}
+                cy={Y(p.total)}
+                r={p.deviates ? 5 : 3.5}
+                fill={p.deviates ? "#B4573B" : "#8FBCA7"}
+                stroke="#FFFFFF"
+                strokeWidth={2}
+              >
+                <title>
+                  {`${p.monthKey} · thực tế ${full(p.total)}${p.deviates ? " (lệch >10% so với dự phóng)" : ""}`}
+                </title>
+              </circle>
+            </g>
+          ))}
+
+          {/* Goal reached marker */}
+          {goalIdx >= 0 && goalIdx <= horizon && (
+            <circle cx={X(goalIdx)} cy={Y(r.nwSeries[goalIdx])} r={4} fill="#1F7A5C" stroke="#FFFFFF" strokeWidth={2}>
+              <title>{`Đạt mục tiêu tại ${r.goalReachedAt}`}</title>
+            </circle>
+          )}
+
           {tickIdx.map((i) => (
-            <circle key={i} cx={X(i)} cy={Y(r.nwSeries[i])} r={3.5} fill="#17554A" stroke="#FFFFFF" strokeWidth={2} />
+            <circle key={i} cx={X(i)} cy={Y(r.nwSeries[i])} r={3} fill="#17554A" stroke="#FFFFFF" strokeWidth={2} />
           ))}
           {tickIdx.map((i) => (
             <text key={`x${i}`} x={X(i)} y={H - 1} fontSize={9} fill="#9AA49E" fontWeight={600} textAnchor="middle">
@@ -139,32 +252,75 @@ export function ForecastClient({
             </text>
           ))}
         </svg>
+        {r.goalTarget > 0 && (
+          <div className="mt-1 text-[12px] font-semibold" style={{ color: r.goalReachedAt ? "#1F7A5C" : "#A5731F" }}>
+            {r.goalReachedAt
+              ? `🏠 Đạt mục tiêu mua nhà (${fmt(r.goalTarget)}) ~ ${r.goalReachedAt}`
+              : `🏠 Chưa đạt mục tiêu ${fmt(r.goalTarget)} trong ${horizon} tháng — thử horizon dài hơn hoặc scenario cao hơn.`}
+          </div>
+        )}
+      </div>
+
+      {/* Chỉnh giả định tại chỗ */}
+      <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
+        <div className="text-[15px] font-bold mb-1">Giả định kế hoạch (chỉnh tại chỗ)</div>
+        <div className="text-[12px] text-muted mb-4">
+          Sửa → biểu đồ tính lại ngay; lưu vào Settings khi rời ô. Chip “ước lượng” mất khi bạn xác nhận số.
+        </div>
+        <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
+          {Object.keys(params.planIncomeMonthly).map((src) => (
+            <AssumptionInput
+              key={src}
+              label={src}
+              value={effectiveParams.planIncomeMonthly[src]}
+              isAssumption={params.assumptions.planIncome[src] && planOverride[src] === undefined}
+              onLocalChange={(v) => setPlanOverride((o) => ({ ...o, [src]: v }))}
+              onCommit={(v) => setForecastPlanValue(src, v)}
+            />
+          ))}
+          <AssumptionInput
+            label="Chi/tháng"
+            value={effectiveParams.planExpenseMonthly}
+            isAssumption={params.assumptions.planExpense && expenseOverride === null}
+            onLocalChange={(v) => setExpenseOverride(v)}
+            onCommit={(v) => setForecastPlanValue("__expense__", v)}
+          />
+        </div>
       </div>
 
       {/* Per-asset-group growth */}
       <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
         {r.groups.map((g) => {
+          const empty = g.series[0] <= 0 && g.series[g.series.length - 1] <= 0;
           const up = g.series[g.series.length - 1] >= g.series[0];
           return (
             <div key={g.key} className="bg-card border border-card-border rounded-[14px] p-4">
               <div className="flex items-center gap-2">
                 <div className="w-[11px] h-[11px] rounded-[3px]" style={{ background: groupColor[g.key] }} />
                 <div className="text-[13px] font-bold flex-1">{g.label}</div>
-                <span
-                  className="text-[11px] font-extrabold rounded-full px-2 py-[3px]"
-                  style={{
-                    background: up ? "#DFF2E7" : "#F7E3DC",
-                    color: up ? "#1F7A5C" : "#B4573B",
-                  }}
-                >
-                  {up ? "▲ " : "▼ "}
-                  {g.series[0] > 0 ? Math.abs(g.growthPct).toFixed(1) + "%" : "new"}
-                </span>
+                {!empty && (
+                  <span
+                    className="text-[11px] font-extrabold rounded-full px-2 py-[3px]"
+                    style={{
+                      background: up ? "#DFF2E7" : "#F7E3DC",
+                      color: up ? "#1F7A5C" : "#B4573B",
+                    }}
+                  >
+                    {up ? "▲ " : "▼ "}
+                    {g.series[0] > 0 ? Math.abs(g.growthPct).toFixed(1) + "%" : "new"}
+                  </span>
+                )}
               </div>
-              <div className="text-[20px] font-extrabold my-2 tnum" title={full(g.series[g.series.length - 1])}>
-                {fmt(g.series[g.series.length - 1])}
-              </div>
-              <Spark series={g.series} color={groupColor[g.key]} />
+              {empty ? (
+                <div className="text-[20px] font-extrabold my-2 text-faint">—</div>
+              ) : (
+                <>
+                  <div className="text-[20px] font-extrabold my-2 tnum" title={full(g.series[g.series.length - 1])}>
+                    {fmt(g.series[g.series.length - 1])}
+                  </div>
+                  <Spark series={g.series} color={groupColor[g.key]} />
+                </>
+              )}
             </div>
           );
         })}
@@ -255,7 +411,7 @@ export function ForecastClient({
                 key={m.monthKey}
                 className="grid gap-2 items-center px-[22px] py-[11px] border-t border-divider text-[12.5px] tnum hover:bg-[#FAF8F2]"
                 style={{ gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 1.15fr 92px` }}
-                title={`${m.monthKey}: thu ${full(m.income)} · chi ${full(m.expense)} · tiết kiệm ${full(m.net)} · net worth ${full(m.netWorth)}`}
+                title={`${m.monthKey}: mở ${full(m.opening)} · tiết kiệm ${full(m.savings)} · lãi ${full(m.return_)} · đóng ${full(m.closing)}`}
               >
                 <div className="font-bold text-ink-soft">{m.monthKey}</div>
                 {r.sources.map((s) => (
@@ -285,6 +441,53 @@ export function ForecastClient({
         </div>
       </div>
     </>
+  );
+}
+
+function AssumptionInput({
+  label,
+  value,
+  isAssumption,
+  onLocalChange,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  isAssumption: boolean;
+  onLocalChange: (v: number) => void;
+  onCommit: (v: number) => void;
+}) {
+  const [text, setText] = useState(String(Math.round(value)));
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <label className="border border-[#EFEAE0] rounded-[14px] p-4 flex flex-col gap-[7px]">
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] font-bold flex-1">{label}</span>
+        {isAssumption && (
+          <span className="text-[10px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-2 py-[2px]">
+            ước lượng
+          </span>
+        )}
+      </div>
+      <input
+        type="number"
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          onLocalChange(Math.round(Number(e.target.value) || 0));
+        }}
+        onBlur={async () => {
+          const v = Math.round(Number(text) || 0);
+          if (v === Math.round(value) && !isAssumption) return;
+          setSaving(true);
+          await onCommit(v);
+          setSaving(false);
+        }}
+        className="border border-card-border rounded-[10px] px-3 py-[9px] text-[14px] font-bold tnum outline-none focus:border-primary bg-white w-full"
+      />
+      <span className="text-[11px] text-muted">{saving ? "Đang lưu…" : full(value) + "/tháng"}</span>
+    </label>
   );
 }
 

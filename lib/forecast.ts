@@ -3,11 +3,14 @@ import type { ForecastParams, ForecastStart } from "@/lib/queries/forecast";
 /**
  * Engine dự phóng thuần (không I/O, không hardcode). Mọi tham số đến từ settings/live views.
  *
- * Mô hình (khớp plan §8 + prototype):
- * - Mỗi tháng: thu = Σ plan_income_source × scenario.income_pct; chi = plan_expense.
- * - Receivables (pending) cộng vào tháng 1 (nếu bật).
- * - Mỗi nhóm tài sản sinh lãi theo group_returns_annual/12; deposits cũng compound.
- * - Net saving mỗi tháng đầu tư lại: 55% vào stock, 45% giữ cash (đúng prototype).
+ * Mô hình (khớp Forecast spec §2 + xlsx Forecast sheet):
+ * - ĐƯỜNG HEADLINE net-worth dùng scenario.annual_return:
+ *     nw[t] = nw[t−1] × (1 + annual_return/12) + (Σ planIncome × income_pct − planExpense)
+ *   + receivablesPending cộng MỘT LẦN ở t=1 (nếu bật).
+ * - GROUP CURVES (cash/gold/stock/deposits) độc lập với headline: mỗi nhóm compound
+ *   theo groupReturnsAnnual/12 của riêng nó (KHÔNG dùng scenario return, KHÔNG tái đầu tư).
+ *   Chúng minh hoạ growth từng nhóm ở lãi suất giả định, không phải phân rã của headline.
+ * - goalReachedAt: tháng đầu tiên headline ≥ houseGoal.down_payment.
  */
 
 export type MonthRow = {
@@ -16,11 +19,12 @@ export type MonthRow = {
   income: number;
   expense: number;
   net: number;
-  cash: number;
-  gold: number;
-  stock: number;
-  deposits: number;
-  netWorth: number;
+  // monthlyDetail theo spec: opening → savings → return_ → closing (trên đường headline)
+  opening: number;
+  savings: number;
+  return_: number;
+  closing: number;
+  netWorth: number; // = closing (giữ tên cũ cho UI)
   momPct: number;
 };
 
@@ -40,7 +44,7 @@ export type GroupSeries = {
 
 export type ForecastResult = {
   months: MonthRow[];
-  nwSeries: number[]; // [start, ...N]
+  nwSeries: number[]; // [start, ...N] — đường headline
   monthKeys: string[]; // nhãn tháng cho series (bao gồm baseline ở index 0)
   startTotal: number;
   endTotal: number;
@@ -49,13 +53,12 @@ export type ForecastResult = {
   avgMonthlyPct: number;
   totalIncome: number;
   totalExpense: number;
-  investGain: number; // phần tăng nhờ lãi = ΔNW − net saving
+  investGain: number; // phần tăng nhờ lãi = ΔNW − net saving (trên đường headline)
   sources: SourceSummary[];
   groups: GroupSeries[];
+  goalReachedAt: string | null; // tháng đầu tiên headline ≥ down_payment; null nếu không đạt
+  goalTarget: number; // down_payment (0 = không đặt mục tiêu)
 };
-
-const INVEST_TO_STOCK = 0.55;
-const INVEST_TO_CASH = 0.45;
 
 /** T7/26 + i tháng → 'T8/26'... */
 function shiftMonthKey(baseline: string, i: number): string {
@@ -78,17 +81,21 @@ export function runForecast(
 ): ForecastResult {
   const sc = params.scenarios[scenarioKey] ?? { income_pct: 1, annual_return: 0.08 };
   const N = horizon;
+  const monthlyReturn = sc.annual_return / 12;
 
+  const startTotal = start.cash + start.gold + start.stock + start.deposits;
+  const sources = Object.keys(params.planIncomeMonthly);
+
+  // ---- Đường headline (dùng scenario.annual_return) ----
+  const nwSeries = [startTotal];
+  const monthKeys = [start.baselineMonthKey];
+
+  // ---- Group curves (độc lập, mỗi nhóm compound theo groupReturnsAnnual) ----
+  const gr = params.groupReturnsAnnual;
   let cash = start.cash;
   let gold = start.gold;
   let stock = start.stock;
   let deposits = start.deposits;
-
-  const startTotal = cash + gold + stock + deposits;
-  const sources = Object.keys(params.planIncomeMonthly);
-
-  const nwSeries = [startTotal];
-  const monthKeys = [start.baselineMonthKey];
   const cashS = [cash];
   const goldS = [gold];
   const stockS = [stock];
@@ -100,7 +107,9 @@ export function runForecast(
   let totalExpense = 0;
   let prevNw = startTotal;
 
-  const gr = params.groupReturnsAnnual;
+  const goalTarget = params.houseGoal?.down_payment ?? 0;
+  let goalReachedAt: string | null =
+    goalTarget > 0 && startTotal >= goalTarget ? start.baselineMonthKey : null;
 
   for (let i = 1; i <= N; i++) {
     const bySource: Record<string, number> = {};
@@ -112,46 +121,51 @@ export function runForecast(
       srcTotals[s] += v;
     }
     const expense = params.planExpenseMonthly;
-    let net = income - expense;
+    let savings = income - expense;
 
-    // receivables land tháng 1
+    // receivables land tháng 1 (một lần)
     if (i === 1 && params.receivablesLandFirstMonth) {
-      net += start.receivablesFirstMonth;
+      savings += start.receivablesFirstMonth;
     }
 
     totalIncome += income;
     totalExpense += expense;
 
-    // lãi từng nhóm (annual/12)
+    // --- Headline: nw[t] = nw[t-1] × (1 + annual_return/12) + savings ---
+    const opening = prevNw;
+    const return_ = opening * monthlyReturn;
+    const closing = opening + return_ + savings;
+    const netWorth = closing;
+
+    const momPct = opening > 0 ? ((netWorth - opening) / opening) * 100 : 0;
+    const monthKey = shiftMonthKey(start.baselineMonthKey, i);
+    nwSeries.push(netWorth);
+    monthKeys.push(monthKey);
+
+    if (goalReachedAt === null && goalTarget > 0 && netWorth >= goalTarget) {
+      goalReachedAt = monthKey;
+    }
+
+    // --- Group curves (độc lập) ---
     cash += cash * (gr.cash / 12);
     gold += gold * (gr.gold / 12);
     stock += stock * (gr.stock / 12);
     deposits += deposits * (gr.deposit / 12);
-
-    // đầu tư lại net saving
-    stock += net * INVEST_TO_STOCK;
-    cash += net * INVEST_TO_CASH;
-
     cashS.push(cash);
     goldS.push(gold);
     stockS.push(stock);
     depS.push(deposits);
 
-    const netWorth = cash + gold + stock + deposits;
-    const momPct = prevNw > 0 ? ((netWorth - prevNw) / prevNw) * 100 : 0;
-    nwSeries.push(netWorth);
-    monthKeys.push(shiftMonthKey(start.baselineMonthKey, i));
-
     months.push({
-      monthKey: shiftMonthKey(start.baselineMonthKey, i),
+      monthKey,
       bySource,
       income,
       expense,
-      net,
-      cash,
-      gold,
-      stock,
-      deposits,
+      net: savings,
+      opening,
+      savings,
+      return_,
+      closing,
       netWorth,
       momPct,
     });
@@ -194,5 +208,7 @@ export function runForecast(
     investGain,
     sources: sourceSummaries,
     groups,
+    goalReachedAt,
+    goalTarget,
   };
 }
