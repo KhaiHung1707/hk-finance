@@ -233,6 +233,52 @@ begin
 end $$;
 
 -- =============================================================================
+-- ACCOUNTS
+-- =============================================================================
+
+-- adjust_account_balance: hiệu chỉnh số dư 1 tài khoản cho khớp thực tế.
+-- KHÔNG ghi đè số dư (số dư là view tính từ giao dịch). Thay vào đó tính phần
+-- lệch giữa số thực tế (p_actual) và số app đang tính (v_account_balances),
+-- rồi tạo 1 giao dịch điều chỉnh received (income nếu thiếu / expense nếu dư,
+-- nguồn/danh mục 'Khác'). Số dư view sẽ khớp p_actual ngay sau đó. Có audit vết.
+create or replace function adjust_account_balance(
+  p_account_id uuid, p_actual bigint, p_month_key text, p_note text default null
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_current bigint; v_diff bigint; v_tx uuid; v_note text;
+begin
+  if p_account_id is null then raise exception 'adjust_account_balance: cần account_id'; end if;
+  if p_actual is null or p_actual < 0 then raise exception 'adjust_account_balance: số dư thực tế phải >= 0'; end if;
+  if not exists (select 1 from accounts where id = p_account_id) then
+    raise exception 'adjust_account_balance: tài khoản không tồn tại';
+  end if;
+  perform ensure_month(p_month_key);
+
+  select balance into v_current from v_account_balances where id = p_account_id;
+  v_current := coalesce(v_current, 0);
+  v_diff := p_actual - v_current;
+
+  if v_diff = 0 then
+    return null; -- đã khớp, không tạo giao dịch
+  end if;
+
+  v_note := coalesce(p_note, 'Điều chỉnh số dư');
+
+  if v_diff > 0 then
+    -- thực tế NHIỀU hơn app tính → thu điều chỉnh
+    insert into transactions(type, status, amount, month_key, source_id, account_id, note, received_at)
+    values ('income','received', v_diff, p_month_key, _source_id('Khác'), p_account_id, v_note, now())
+    returning id into v_tx;
+  else
+    -- thực tế ÍT hơn app tính → chi điều chỉnh
+    insert into transactions(type, status, amount, month_key, category_id, account_id, note, received_at)
+    values ('expense','received', -v_diff, p_month_key, _category_id('Khác'), p_account_id, v_note, now())
+    returning id into v_tx;
+  end if;
+  return v_tx;
+end $$;
+
+-- =============================================================================
 -- FUNCTION PRIVILEGES (chạy CUỐI CÙNG — sau khi mọi RPC P1/P2/P3 đã tạo).
 -- Mọi RPC là security definer; Postgres/Supabase mặc định GRANT execute cho
 -- `public`. Nếu không revoke, `anon` (chưa đăng nhập) gọi thẳng RPC ghi tiền,
