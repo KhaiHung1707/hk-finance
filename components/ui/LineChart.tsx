@@ -3,11 +3,13 @@ import { useMemo, useRef, useState } from "react";
 import { fmt, full } from "@/lib/format";
 
 /**
- * Chart tái sử dụng (SVG thuần, không lib ngoài, light theme).
+ * Chart tái sử dụng (light theme, không lib ngoài).
+ * SVG chỉ vẽ line/area/grid/dot/crosshair (stretch để lấp đầy khung); MỌI CHỮ
+ * (nhãn trục, tooltip) là HTML overlay tuyệt đối → luôn sắc nét, không bị méo khi
+ * SVG giãn ngang (khắc phục lỗi "phóng to & mờ" của preserveAspectRatio=none).
+ *
  * Toolkit: hover tooltip theo điểm-X (liệt kê mọi series) + crosshair dọc + dot,
  * toggle line/bar, legend bật/tắt series. Text dùng token ink; màu chỉ ở mark.
- *
- * Dữ liệu: labels (trục X) + series[{ key, label, color, values[] }] cùng độ dài labels.
  */
 export type ChartSeries = {
   key: string;
@@ -16,9 +18,11 @@ export type ChartSeries = {
   values: number[];
 };
 
-const PAD = { l: 8, r: 14, t: 14, b: 26 };
-const VW = 720; // viewBox width
-const VH = 260; // viewBox height
+// Toạ độ SVG chuẩn hoá 0..100 (cả hai trục) — SVG stretch, nên số này chỉ là tỉ lệ.
+const VW = 100;
+const VH = 100;
+const PADX = { l: 0, r: 0 }; // padding ngang tính bằng %, chừa cho nhãn ở HTML
+const PADY = { t: 6, b: 8 }; // % chừa trên/dưới trong SVG
 
 export function LineChart({
   labels,
@@ -26,7 +30,6 @@ export function LineChart({
   height = 300,
   allowBar = true,
   defaultMode = "line",
-  yFormat = fmt,
   ariaLabel = "Biểu đồ",
 }: {
   labels: string[];
@@ -34,41 +37,37 @@ export function LineChart({
   height?: number;
   allowBar?: boolean;
   defaultMode?: "line" | "bar";
-  yFormat?: (v: number) => string;
   ariaLabel?: string;
 }) {
   const [mode, setMode] = useState<"line" | "bar">(defaultMode);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [hoverX, setHoverX] = useState<number | null>(null); // index tháng đang hover
-  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   const shown = series.filter((s) => !hidden.has(s.key));
   const n = labels.length;
 
-  // trục Y bao trùm mọi series đang hiển thị (bar: cộng dồn không cần — đây là grouped/overlay line)
-  const { yMin, yMax } = useMemo(() => {
+  const yMax = useMemo(() => {
     let mx = 0;
     for (const s of shown) for (const v of s.values) if (v > mx) mx = v;
-    return { yMin: 0, yMax: mx || 1 };
+    return mx || 1;
   }, [shown]);
 
-  const plotW = VW - PAD.l - PAD.r - 40; // chừa 40 cho nhãn Y
-  const x0 = PAD.l + 40;
-  const X = (i: number) => (n <= 1 ? x0 + plotW / 2 : x0 + (i / (n - 1)) * plotW);
-  const Y = (v: number) => PAD.t + (1 - (v - yMin) / (yMax - yMin || 1)) * (VH - PAD.t - PAD.b);
+  // vị trí theo % (0..100) trong vùng vẽ — dùng chung cho SVG và overlay HTML.
+  const xPct = (i: number) => (n <= 1 ? 50 : (i / (n - 1)) * 100);
+  const yPct = (v: number) => PADY.t + (1 - v / yMax) * (100 - PADY.t - PADY.b);
 
-  const gridVals = [0, 0.25, 0.5, 0.75, 1].map((t) => yMin + (yMax - yMin) * t);
+  const gridSteps = [0, 0.25, 0.5, 0.75, 1];
 
-  function onMove(e: React.PointerEvent<SVGSVGElement>) {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const px = ((e.clientX - rect.left) / rect.width) * VW; // toạ độ trong viewBox
-    // snap tới index gần nhất
+  function onMove(e: React.PointerEvent<HTMLDivElement>) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * 100;
     let best = 0;
     let bestD = Infinity;
     for (let i = 0; i < n; i++) {
-      const d = Math.abs(X(i) - px);
+      const d = Math.abs(xPct(i) - px);
       if (d < bestD) {
         bestD = d;
         best = i;
@@ -86,17 +85,20 @@ export function LineChart({
     });
   }
 
-  // bar layout: nhóm cột theo tháng, mỗi series 1 thanh
-  const groupW = n > 0 ? plotW / n : plotW;
-  const barGap = 2;
-  const barW = shown.length > 0 ? Math.max(3, (groupW * 0.62) / shown.length - barGap) : 3;
+  const barGroupW = n > 0 ? 100 / n : 100;
+  const barW = shown.length > 0 ? Math.max(1.5, (barGroupW * 0.6) / shown.length) : 1.5;
 
-  // vị trí tooltip (px trong viewBox → % để đặt div overlay)
-  const tipLeftPct = hoverX != null ? (X(hoverX) / VW) * 100 : 0;
-  const tipOnRight = tipLeftPct > 60;
+  const tipLeftPct = hoverX != null ? xPct(hoverX) : 0;
+  const tipOnRight = tipLeftPct > 58;
+
+  // nhãn X: thưa nếu nhiều
+  const xLabelIdx = labels.map((_, i) => i).filter((i) => {
+    const step = Math.ceil(n / 8);
+    return n <= 8 || i % step === 0 || i === n - 1;
+  });
 
   return (
-    <div className="relative w-full">
+    <div className="w-full">
       {/* toggle line/bar */}
       {allowBar && (
         <div className="flex justify-end mb-2">
@@ -121,156 +123,183 @@ export function LineChart({
         </div>
       )}
 
-      {/* legend — bật/tắt series */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
-        {series.map((s) => {
-          const off = hidden.has(s.key);
-          return (
-            <button
-              key={s.key}
-              onClick={() => toggle(s.key)}
-              className="flex items-center gap-[7px] cursor-pointer bg-transparent border-0 p-0 text-[12px]"
-              style={{ opacity: off ? 0.4 : 1 }}
-              aria-pressed={!off}
-            >
-              {mode === "bar" ? (
-                <span className="w-[11px] h-[11px] rounded-[3px]" style={{ background: s.color }} />
-              ) : (
-                <span className="w-[14px] h-[3px] rounded-full" style={{ background: s.color }} />
-              )}
-              <span className={`font-semibold ${off ? "line-through text-muted" : "text-ink-soft"}`}>{s.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* legend */}
+      {series.length > 1 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3">
+          {series.map((s) => {
+            const off = hidden.has(s.key);
+            return (
+              <button
+                key={s.key}
+                onClick={() => toggle(s.key)}
+                className="flex items-center gap-[7px] cursor-pointer bg-transparent border-0 p-0 text-[12px]"
+                style={{ opacity: off ? 0.4 : 1 }}
+                aria-pressed={!off}
+              >
+                {mode === "bar" ? (
+                  <span className="w-[11px] h-[11px] rounded-[3px]" style={{ background: s.color }} />
+                ) : (
+                  <span className="w-[14px] h-[3px] rounded-full" style={{ background: s.color }} />
+                )}
+                <span className={`font-semibold ${off ? "line-through text-muted" : "text-ink-soft"}`}>{s.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      <div className="relative">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${VW} ${VH}`}
-          preserveAspectRatio="none"
-          className="w-full"
+      {/* Khu vẽ: nhãn Y (HTML, trái) + plot (SVG stretch + overlay HTML) */}
+      <div className="flex">
+        {/* Y labels — HTML, sắc nét */}
+        <div className="relative flex-shrink-0 w-[44px]" style={{ height }}>
+          {gridSteps.map((t, i) => (
+            <div
+              key={i}
+              className="absolute right-2 text-[10px] font-semibold text-faint tnum -translate-y-1/2"
+              style={{ top: `${(yPct(yMax * t) / 100) * height}px` }}
+            >
+              {fmt(yMax * t)}
+            </div>
+          ))}
+        </div>
+
+        {/* Plot */}
+        <div
+          ref={wrapRef}
+          className="relative flex-1 min-w-0"
           style={{ height }}
-          role="img"
-          aria-label={ariaLabel}
           onPointerMove={onMove}
           onPointerLeave={() => setHoverX(null)}
         >
-          {/* gridlines + Y labels */}
-          {gridVals.map((v, i) => (
-            <g key={i}>
+          <svg
+            viewBox={`0 0 ${VW} ${VH}`}
+            preserveAspectRatio="none"
+            className="absolute inset-0 w-full h-full"
+            role="img"
+            aria-label={ariaLabel}
+          >
+            {/* gridlines */}
+            {gridSteps.map((t, i) => (
               <line
-                x1={x0}
-                y1={Y(v)}
-                x2={VW - PAD.r}
-                y2={Y(v)}
+                key={i}
+                x1={0}
+                y1={yPct(yMax * t)}
+                x2={100}
+                y2={yPct(yMax * t)}
                 stroke="#EFEAE0"
-                strokeWidth={1}
-                strokeDasharray={i === 0 ? "0" : "3 4"}
+                strokeWidth={0.4}
+                strokeDasharray={i === 0 ? "0" : "1 1.4"}
+                vectorEffect="non-scaling-stroke"
               />
-              <text x={x0 - 6} y={Y(v) + 3} fontSize={10} fill="#9AA49E" fontWeight={600} textAnchor="end">
-                {yFormat(v)}
-              </text>
-            </g>
+            ))}
+
+            {mode === "line"
+              ? shown.map((s) => {
+                  const pts = s.values.map((v, i) => `${xPct(i).toFixed(2)},${yPct(v).toFixed(2)}`).join(" ");
+                  const area = `${xPct(0).toFixed(2)},${yPct(0)} ${pts} ${xPct(n - 1).toFixed(2)},${yPct(0)}`;
+                  return (
+                    <g key={s.key}>
+                      {shown.length === 1 && <polygon points={area} fill={s.color} opacity={0.1} />}
+                      <polyline
+                        points={pts}
+                        fill="none"
+                        stroke={s.color}
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  );
+                })
+              : labels.map((_, i) => (
+                  <g key={i}>
+                    {shown.map((s, si) => {
+                      const bx = xPct(i) - (shown.length * barW) / 2 + si * barW;
+                      const by = yPct(s.values[i]);
+                      const bh = Math.max(0, yPct(0) - by);
+                      return (
+                        <rect
+                          key={s.key}
+                          x={bx}
+                          y={by}
+                          width={barW * 0.86}
+                          height={bh}
+                          fill={s.color}
+                          opacity={hoverX === null || hoverX === i ? 1 : 0.45}
+                        />
+                      );
+                    })}
+                  </g>
+                ))}
+
+            {/* crosshair (line mode) */}
+            {hoverX != null && mode === "line" && (
+              <line
+                x1={xPct(hoverX)}
+                y1={PADY.t}
+                x2={xPct(hoverX)}
+                y2={yPct(0)}
+                stroke="#B9C2BC"
+                strokeWidth={1}
+                strokeDasharray="2 2"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+
+          {/* dots — HTML tròn đều (không méo theo SVG stretch) */}
+          {hoverX != null &&
+            mode === "line" &&
+            shown.map((s) => (
+              <span
+                key={s.key}
+                className="absolute w-[9px] h-[9px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                style={{
+                  left: `${xPct(hoverX)}%`,
+                  top: `${(yPct(s.values[hoverX]) / 100) * height}px`,
+                  background: s.color,
+                }}
+              />
+            ))}
+
+          {/* X labels — HTML */}
+          {xLabelIdx.map((i) => (
+            <div
+              key={i}
+              className="absolute bottom-0 text-[10px] font-semibold text-faint -translate-x-1/2"
+              style={{ left: `${xPct(i)}%` }}
+            >
+              {i === 0 ? "now" : labels[i]}
+            </div>
           ))}
 
-          {/* X labels */}
-          {labels.map((lb, i) => {
-            const step = Math.ceil(n / 8);
-            if (n > 8 && i % step !== 0 && i !== n - 1) return null;
-            return (
-              <text key={i} x={X(i)} y={VH - 8} fontSize={10} fill="#9AA49E" fontWeight={600} textAnchor="middle">
-                {i === 0 ? "now" : lb}
-              </text>
-            );
-          })}
-
-          {/* marks */}
-          {mode === "line"
-            ? shown.map((s) => {
-                const pts = s.values.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
-                const area = `${X(0).toFixed(1)},${Y(yMin)} ${pts} ${X(n - 1).toFixed(1)},${Y(yMin)}`;
-                return (
-                  <g key={s.key}>
-                    {shown.length === 1 && <polygon points={area} fill={s.color} opacity={0.08} />}
-                    <polyline
-                      points={pts}
-                      fill="none"
-                      stroke={s.color}
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  </g>
-                );
-              })
-            : labels.map((_, i) => (
-                <g key={i}>
-                  {shown.map((s, si) => {
-                    const bx = X(i) - (shown.length * (barW + barGap)) / 2 + si * (barW + barGap);
-                    const by = Y(s.values[i]);
-                    const bh = Math.max(0, Y(yMin) - by);
-                    return (
-                      <rect
-                        key={s.key}
-                        x={bx}
-                        y={by}
-                        width={barW}
-                        height={bh}
-                        rx={2}
-                        fill={s.color}
-                        opacity={hoverX === null || hoverX === i ? 1 : 0.5}
-                      />
-                    );
-                  })}
-                </g>
-              ))}
-
-          {/* crosshair + dots (chỉ line mode; bar highlight bằng opacity) */}
-          {hoverX != null && mode === "line" && (
-            <>
-              <line x1={X(hoverX)} y1={PAD.t} x2={X(hoverX)} y2={Y(yMin)} stroke="#B9C2BC" strokeWidth={1} strokeDasharray="4 4" />
-              {shown.map((s) => (
-                <circle
-                  key={s.key}
-                  cx={X(hoverX)}
-                  cy={Y(s.values[hoverX])}
-                  r={4}
-                  fill={s.color}
-                  stroke="#FFFFFF"
-                  strokeWidth={2}
-                />
-              ))}
-            </>
-          )}
-        </svg>
-
-        {/* tooltip */}
-        {hoverX != null && shown.length > 0 && (
-          <div
-            className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3 shadow-lg"
-            style={{
-              left: tipOnRight ? undefined : `calc(${tipLeftPct}% + 12px)`,
-              right: tipOnRight ? `calc(${100 - tipLeftPct}% + 12px)` : undefined,
-              minWidth: 168,
-              boxShadow: "0 12px 32px rgba(14,44,38,0.16)",
-            }}
-          >
-            <div className="text-[12px] font-bold text-muted mb-2">{labels[hoverX]}</div>
-            <div className="flex flex-col gap-[6px]">
-              {shown.map((s) => (
-                <div key={s.key} className="flex items-center gap-2 text-[12px]">
-                  <span className="w-[12px] h-[3px] rounded-full flex-shrink-0" style={{ background: s.color }} />
-                  <span className="text-ink-soft">{s.label}</span>
-                  <span className="ml-auto font-extrabold text-ink tnum" title={full(s.values[hoverX])}>
-                    {fmt(s.values[hoverX])}
-                  </span>
-                </div>
-              ))}
+          {/* tooltip */}
+          {hoverX != null && shown.length > 0 && (
+            <div
+              className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3"
+              style={{
+                left: tipOnRight ? undefined : `calc(${tipLeftPct}% + 12px)`,
+                right: tipOnRight ? `calc(${100 - tipLeftPct}% + 12px)` : undefined,
+                minWidth: 168,
+                boxShadow: "0 12px 32px rgba(14,44,38,0.16)",
+              }}
+            >
+              <div className="text-[12px] font-bold text-muted mb-2">{labels[hoverX]}</div>
+              <div className="flex flex-col gap-[6px]">
+                {shown.map((s) => (
+                  <div key={s.key} className="flex items-center gap-2 text-[12px]">
+                    <span className="w-[12px] h-[3px] rounded-full flex-shrink-0" style={{ background: s.color }} />
+                    <span className="text-ink-soft">{s.label}</span>
+                    <span className="ml-auto font-extrabold text-ink tnum" title={full(s.values[hoverX])}>
+                      {fmt(s.values[hoverX])}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

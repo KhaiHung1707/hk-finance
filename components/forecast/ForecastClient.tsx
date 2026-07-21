@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { fmt, full } from "@/lib/format";
 import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
@@ -66,6 +66,8 @@ export function ForecastClient({
   const [planOverride, setPlanOverride] = useState<Record<string, number>>({});
   const [expenseOverride, setExpenseOverride] = useState<number | null>(null);
   const [showActual, setShowActual] = useState(true);
+  const [nwHover, setNwHover] = useState<number | null>(null); // index tháng hover trên chart net-worth
+  const nwWrapRef = useRef<HTMLDivElement | null>(null);
 
   // params hiệu lực = params gốc + override (chưa cần đợi network).
   const effectiveParams: ForecastParams = useMemo(() => {
@@ -231,6 +233,29 @@ export function ForecastClient({
             )}
           </div>
         </div>
+        <div
+          ref={nwWrapRef}
+          className="relative"
+          onPointerMove={(e) => {
+            const el = nwWrapRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const frac = (e.clientX - rect.left) / rect.width; // 0..1 theo bề rộng
+            // map sang toạ độ viewBox rồi tìm i gần nhất (X(i) = 46 + i/horizon*(W-54))
+            const vx = frac * W;
+            let best = 0;
+            let bestD = Infinity;
+            for (let i = 0; i <= horizon; i++) {
+              const d = Math.abs(X(i) - vx);
+              if (d < bestD) {
+                bestD = d;
+                best = i;
+              }
+            }
+            setNwHover(best);
+          }}
+          onPointerLeave={() => setNwHover(null)}
+        >
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height: 260 }}>
           <defs>
             <filter id="nwglow" x="-4%" y="-20%" width="108%" height="140%">
@@ -305,7 +330,52 @@ export function ForecastClient({
               {i === 0 ? "now" : r.monthKeys[i]}
             </text>
           ))}
+
+          {/* crosshair khi hover */}
+          {nwHover != null && (
+            <line
+              x1={X(nwHover)}
+              y1={10}
+              x2={X(nwHover)}
+              y2={H - 10}
+              stroke="#B9C2BC"
+              strokeWidth={1}
+              strokeDasharray="4 4"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </svg>
+
+        {/* dot + tooltip HTML (sắc nét, không méo theo SVG stretch) */}
+        {nwHover != null && (
+          <>
+            <span
+              className="absolute w-[10px] h-[10px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none bg-primary"
+              style={{ left: `${(X(nwHover) / W) * 100}%`, top: `${(Y(r.nwSeries[nwHover]) / H) * 260}px` }}
+            />
+            <div
+              className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3"
+              style={{
+                left: (X(nwHover) / W) * 100 > 58 ? undefined : `calc(${(X(nwHover) / W) * 100}% + 12px)`,
+                right: (X(nwHover) / W) * 100 > 58 ? `calc(${100 - (X(nwHover) / W) * 100}% + 12px)` : undefined,
+                minWidth: 150,
+                boxShadow: "0 12px 32px rgba(14,44,38,0.16)",
+              }}
+            >
+              <div className="text-[12px] font-bold text-muted mb-1">
+                {nwHover === 0 ? "now" : r.monthKeys[nwHover]}
+              </div>
+              <div className="flex items-center gap-2 text-[12px]">
+                <span className="w-[12px] h-[3px] rounded-full bg-primary flex-shrink-0" />
+                <span className="text-ink-soft">Net worth</span>
+                <span className="ml-auto font-extrabold text-ink tnum" title={full(r.nwSeries[nwHover])}>
+                  {fmt(r.nwSeries[nwHover])}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
+        </div>
         {r.goalTarget > 0 && (
           <div
             className="mt-3 rounded-[12px] px-4 py-3 flex items-center gap-3 flex-wrap"
