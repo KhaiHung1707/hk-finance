@@ -61,7 +61,7 @@ export function AppShell({
                     className={
                       active
                         ? "flex items-center gap-[7px] bg-white text-primary rounded-full px-[11px] py-[7px] text-[12px] font-bold whitespace-nowrap"
-                        : "flex items-center gap-[7px] text-white/90 rounded-full px-[10px] py-[7px] text-[12px] font-semibold whitespace-nowrap hover:bg-white/15 hover:text-white transition-colors"
+                        : "nav-link flex items-center gap-[7px] text-white rounded-full px-[10px] py-[7px] text-[12px] font-semibold whitespace-nowrap hover:bg-white/15 transition-colors"
                     }
                   >
                     <i className={n.icon} aria-hidden />

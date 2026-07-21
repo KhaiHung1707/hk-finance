@@ -41,6 +41,16 @@ a:hover {
   color: #123f36;
 }
 
+/* Nav header trên band xanh: giữ chữ + icon trắng, không bị rule `a`/`a:hover`
+   toàn cục kéo về xanh đậm. Icon duotone: ép cả 2 lớp về trắng đều. */
+.nav-link,
+.nav-link:hover {
+  color: #fff;
+}
+.nav-link i {
+  opacity: 1;
+}
+
 .tnum {
   font-variant-numeric: tabular-nums;
 }
