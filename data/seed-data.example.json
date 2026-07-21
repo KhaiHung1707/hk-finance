@@ -61,6 +61,7 @@
     "allocation_targets": { "cash": 0.30, "gold": 0.30, "stock": 0.40 },
     "upwork_fee_pct": 0.10,
     "deposit_default_rate": { "value": 0.05, "assumption": true },
+    "deposit_early_rate": 0.002,
     "forecast": {
       "plan_income_monthly": {
         "Structure": { "value": 0, "assumption": true },

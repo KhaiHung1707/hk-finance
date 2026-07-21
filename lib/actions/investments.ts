@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { positive, positiveInt, ratePercent, nonEmpty, guard } from "@/lib/validate";
+import { positive, positiveInt, nonNegative, nonEmpty, guard } from "@/lib/validate";
 
 function rev() {
   revalidatePath("/investments");
@@ -44,16 +44,29 @@ export async function openDeposit(input: {
   });
 }
 
-export async function settleDeposit(id: string, accountId: string, monthKey: string) {
-  const sb = await createClient();
-  const { error } = await sb.rpc("settle_deposit", {
-    p_id: id,
-    p_account_id: accountId,
-    p_month_key: monthKey,
+export async function settleDeposit(input: {
+  id: string;
+  accountId: string;
+  monthKey: string;
+  settleOn?: string; // YYYY-MM-DD; mặc định hôm nay (server)
+  interestOverride?: number | null;
+}) {
+  return guard(async () => {
+    if (!input.accountId) return { ok: false, error: "Cần chọn tài khoản nhận" };
+    const override =
+      input.interestOverride == null ? null : Math.round(nonNegative(input.interestOverride, "Lãi"));
+    const sb = await createClient();
+    const { error } = await sb.rpc("settle_deposit", {
+      p_id: input.id,
+      p_account_id: input.accountId,
+      p_month_key: input.monthKey,
+      p_settle_on: input.settleOn || null,
+      p_interest_override: override,
+    });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
   });
-  if (error) return { ok: false, error: error.message };
-  rev();
-  return { ok: true };
 }
 
 export async function buyStock(input: {

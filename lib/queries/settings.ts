@@ -16,6 +16,14 @@ export async function getHouseGoal(): Promise<{ down_payment: number; target_yea
   return { down_payment: Number(h.down_payment ?? 0), target_year: Number(h.target_year ?? 0) };
 }
 
+/** Lãi suất không kỳ hạn dùng khi tất toán sớm (G2). Mặc định 0.002. */
+export async function getDepositEarlyRate(): Promise<number> {
+  const sb = await createClient();
+  const { data } = await sb.from("settings").select("value").eq("key", "deposit_early_rate").maybeSingle();
+  const v = Number(data?.value ?? 0.002);
+  return Number.isFinite(v) && v > 0 ? v : 0.002;
+}
+
 export async function getSettingsBundle(): Promise<SettingsBundle> {
   const sb = await createClient();
   const [{ data: settings }, { data: fx }, { data: gold }] = await Promise.all([

@@ -215,6 +215,8 @@ async function main() {
       ["allocation_targets", s.allocation_targets],
       ["upwork_fee_pct", s.upwork_fee_pct],
       ["deposit_default_rate", s.deposit_default_rate],
+      // early_rate cho tất toán sớm (lãi không kỳ hạn). Mặc định 0.002 (assumption).
+      ["deposit_early_rate", s.deposit_early_rate ?? 0.002],
       ["forecast", s.forecast],
       ["house_goal", s.house_goal],
       ["timezone", s.timezone],

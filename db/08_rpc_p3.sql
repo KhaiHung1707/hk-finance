@@ -16,11 +16,18 @@ create or replace function open_deposit(
   p_start date, p_account_id uuid default null, p_month_key text default null
 ) returns uuid
 language plpgsql security definer set search_path = public as $$
-declare v_id uuid; v_maturity date; v_mk text;
+declare v_id uuid; v_maturity date; v_mk text; v_bal bigint;
 begin
   if p_principal is null or p_principal <= 0 then raise exception 'open_deposit: principal phải > 0'; end if;
   if p_rate is null or p_rate < 0 or p_rate > 1 then raise exception 'open_deposit: rate phải trong [0,1]'; end if;
   if p_term_months is null or p_term_months <= 0 then raise exception 'open_deposit: term_months phải > 0'; end if;
+  -- G4: nếu có tài khoản nguồn, principal không vượt số dư (tránh âm quỹ).
+  if p_account_id is not null then
+    select balance into v_bal from v_account_balances where id = p_account_id;
+    if coalesce(v_bal, 0) < p_principal then
+      raise exception 'open_deposit: principal (%) vượt số dư tài khoản nguồn (%)', p_principal, coalesce(v_bal,0);
+    end if;
+  end if;
   v_maturity := (p_start + (p_term_months || ' months')::interval)::date;
   insert into term_deposits(name, principal, annual_rate, term_months, start_on, maturity_on, source_account_id, status)
   values (p_name, p_principal, p_rate, p_term_months, p_start, v_maturity, p_account_id, 'active')
@@ -35,30 +42,59 @@ begin
   return v_id;
 end $$;
 
--- settle_deposit: tất toán. interest = principal × rate × term_months/12.
--- income tx received = principal + interest vào account. status → settled.
-create or replace function settle_deposit(p_id uuid, p_account_id uuid, p_month_key text)
-returns uuid
+-- settle_deposit: tất toán sổ tiết kiệm (G2 spec).
+--   p_settle_on (mặc định current_date) quyết định nhánh:
+--   - ĐÁO HẠN (settle_on >= maturity_on): lãi = principal × rate × term_months/12; status settled.
+--   - TẤT TOÁN SỚM (settle_on < maturity_on): lãi = principal × early_rate × days_held/365
+--       (early_rate lấy từ settings.deposit_early_rate, mặc định 0.002); status withdrawn_early.
+--   - p_interest_override (>=0) nếu truyền → dùng thẳng, bỏ qua công thức (user chỉnh trong modal).
+--   income tx received = principal + interest vào account (backlink → term_deposits). Atomic.
+create or replace function settle_deposit(
+  p_id uuid, p_account_id uuid, p_month_key text,
+  p_settle_on date default null, p_interest_override bigint default null
+) returns uuid
 language plpgsql security definer set search_path = public as $$
-declare v_principal bigint; v_rate numeric; v_term int; v_status text; v_interest bigint; v_tx uuid; v_name text;
+declare
+  v_principal bigint; v_rate numeric; v_term int; v_status text; v_name text;
+  v_start date; v_maturity date; v_settle date; v_days_held int;
+  v_early_rate numeric; v_interest bigint; v_early boolean; v_new_status text; v_tx uuid;
 begin
   perform ensure_month(p_month_key);
-  select principal, annual_rate, term_months, status, name
-    into v_principal, v_rate, v_term, v_status, v_name
+  select principal, annual_rate, term_months, status, name, start_on, maturity_on
+    into v_principal, v_rate, v_term, v_status, v_name, v_start, v_maturity
   from term_deposits where id = p_id for update;
   if not found then raise exception 'settle_deposit: sổ không tồn tại'; end if;
   if v_status <> 'active' then raise exception 'settle_deposit: sổ không active'; end if;
   if p_account_id is null then raise exception 'settle_deposit: cần account_id'; end if;
+  if p_interest_override is not null and p_interest_override < 0 then
+    raise exception 'settle_deposit: interest_override phải >= 0';
+  end if;
 
-  v_interest := (v_principal * v_rate * v_term / 12.0)::bigint;
+  v_settle := coalesce(p_settle_on, current_date);
+  v_early := v_maturity is not null and v_settle < v_maturity;
 
-  -- income received = principal + interest vào cash
-  insert into transactions(type, status, amount, month_key, source_id, account_id, note, received_at)
+  if p_interest_override is not null then
+    v_interest := p_interest_override;
+  elsif v_early then
+    v_days_held := greatest(v_settle - v_start, 0);
+    select coalesce((value #>> '{}')::numeric, 0.002) into v_early_rate
+      from settings where key = 'deposit_early_rate';
+    v_early_rate := coalesce(v_early_rate, 0.002);
+    v_interest := (v_principal * v_early_rate * v_days_held / 365.0)::bigint;
+  else
+    v_interest := (v_principal * v_rate * v_term / 12.0)::bigint;
+  end if;
+
+  v_new_status := case when v_early then 'withdrawn_early' else 'settled' end;
+
+  insert into transactions(type, status, amount, month_key, source_id, account_id, note, received_at, ref_table, ref_id)
   values ('income','received', v_principal + v_interest, p_month_key, _source_id('Đầu tư'),
-          p_account_id, 'Tất toán sổ — ' || v_name || ' (gốc + lãi)', now())
+          p_account_id,
+          case when v_early then 'Tất toán sớm — ' else 'Tất toán sổ — ' end || v_name || ' (gốc + lãi)',
+          now(), 'term_deposits', p_id)
   returning id into v_tx;
 
-  update term_deposits set status='settled', settle_tx_id=v_tx where id=p_id;
+  update term_deposits set status = v_new_status, settle_tx_id = v_tx where id = p_id;
   return v_tx;
 end $$;
 
@@ -89,6 +125,7 @@ begin
   insert into stock_trades(ticker, side, qty, unit_price, traded_on, tx_id)
   values (p_ticker, 'buy', p_qty, p_price, coalesce(p_traded_on, current_date), v_tx)
   returning id into v_trade;
+  update transactions set ref_table='stock_trades', ref_id=v_trade where id=v_tx;
   return v_trade;
 end $$;
 
@@ -119,6 +156,7 @@ begin
   insert into stock_trades(ticker, side, qty, unit_price, traded_on, tx_id)
   values (p_ticker, 'sell', p_qty, p_price, coalesce(p_traded_on, current_date), v_tx)
   returning id into v_trade;
+  update transactions set ref_table='stock_trades', ref_id=v_trade where id=v_tx;
   return v_trade;
 end $$;
 
@@ -138,6 +176,7 @@ begin
   returning id into v_tx;
   insert into dividends(ticker, amount, month_key, tx_id)
   values (p_ticker, p_amount, p_month_key, v_tx) returning id into v_div;
+  update transactions set ref_table='dividends', ref_id=v_div where id=v_tx;
   return v_div;
 end $$;
 
@@ -166,6 +205,7 @@ begin
     v_tx := record_expense(_category_id('Đầu tư'), v_total, v_mk, p_account_id,
                            'Mua vàng ' || p_quantity || ' chỉ');
     update gold_lots set purchase_tx_id = v_tx where id = v_lot;
+    update transactions set ref_table='gold_lots', ref_id=v_lot where id=v_tx;
   end if;
   return v_lot;
 end $$;
@@ -185,9 +225,9 @@ begin
   if v_status <> 'held' then raise exception 'sell_gold_lot: lô đã bán'; end if;
   v_total := (v_qty * p_sold_price)::bigint;
 
-  insert into transactions(type, status, amount, month_key, source_id, account_id, note, received_at)
+  insert into transactions(type, status, amount, month_key, source_id, account_id, note, received_at, ref_table, ref_id)
   values ('income','received', v_total, p_month_key, _source_id('Đầu tư'), p_account_id,
-          'Bán vàng ' || v_qty || ' chỉ @ ' || p_sold_price, now())
+          'Bán vàng ' || v_qty || ' chỉ @ ' || p_sold_price, now(), 'gold_lots', p_lot_id)
   returning id into v_tx;
 
   update gold_lots

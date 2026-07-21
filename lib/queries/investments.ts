@@ -55,3 +55,43 @@ export async function getStockPositions(): Promise<StockPosition[]> {
     last_price: Number(s.last_price),
   }));
 }
+
+export type StockHistoryRow = {
+  ticker: string;
+  kind: "buy" | "sell" | "dividend";
+  qty: number | null;
+  unit_price: number | null;
+  amount: number; // buy/sell: qty×price; dividend: amount
+  on: string; // ngày (trade) hoặc month_key (dividend)
+};
+
+/** Lịch sử giao dịch mọi ticker (buy/sell + dividend), theo thời gian — cho expand row. */
+export async function getStockHistory(): Promise<Record<string, StockHistoryRow[]>> {
+  const sb = await createClient();
+  const [{ data: trades }, { data: divs }] = await Promise.all([
+    sb.from("stock_trades").select("ticker, side, qty, unit_price, traded_on").order("traded_on"),
+    sb.from("dividends").select("ticker, amount, month_key").order("month_key"),
+  ]);
+  const out: Record<string, StockHistoryRow[]> = {};
+  for (const t of trades ?? []) {
+    (out[t.ticker] ??= []).push({
+      ticker: t.ticker,
+      kind: t.side as "buy" | "sell",
+      qty: Number(t.qty),
+      unit_price: Number(t.unit_price),
+      amount: Number(t.qty) * Number(t.unit_price),
+      on: t.traded_on,
+    });
+  }
+  for (const d of divs ?? []) {
+    (out[d.ticker] ??= []).push({
+      ticker: d.ticker,
+      kind: "dividend",
+      qty: null,
+      unit_price: null,
+      amount: Number(d.amount),
+      on: d.month_key,
+    });
+  }
+  return out;
+}

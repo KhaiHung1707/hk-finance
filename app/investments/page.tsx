@@ -2,23 +2,29 @@ import { AppShell } from "@/components/ui/AppShell";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { InvestmentsClient } from "@/components/investments/InvestmentsClient";
-import { getDeposits, getStockPositions } from "@/lib/queries/investments";
+import { getDeposits, getStockPositions, getStockHistory } from "@/lib/queries/investments";
 import { getAccountsRef, getBaselineMonthKey, getProfile } from "@/lib/queries";
+import { getDepositEarlyRate } from "@/lib/queries/settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function InvestmentsPage() {
   const monthKey = await getBaselineMonthKey();
-  const [deposits, positions, accounts, profile] = await Promise.all([
+  const [deposits, positions, history, accounts, earlyRate, profile] = await Promise.all([
     getDeposits(),
     getStockPositions(),
+    getStockHistory(),
     getAccountsRef(),
+    getDepositEarlyRate(),
     getProfile(),
   ]);
 
   const activeDeposits = deposits.filter((d) => d.status === "active");
   const depTotal = activeDeposits.reduce((s, d) => s + d.principal, 0);
-  const depInterest = activeDeposits.reduce((s, d) => s + d.interest_full, 0);
+  const depInterestMaturity = activeDeposits.reduce((s, d) => s + d.interest_full, 0);
+  const depAccrued = activeDeposits.reduce((s, d) => s + d.interest_accrued, 0);
+
+  const hasStock = positions.length > 0;
   const stockValue = positions.reduce((s, p) => s + p.qty * p.last_price, 0);
   const stockCost = positions.reduce((s, p) => s + p.qty * p.avg_cost, 0);
   const stockPl = stockValue - stockCost;
@@ -39,33 +45,47 @@ export default async function InvestmentsPage() {
           value={<MoneyText value={depTotal} />}
           label="Deposits principal"
         />
+        {/* G3: accrued (primary) + maturity (secondary) */}
         <MetricCard
           icon="ph-duotone ph-percent"
           iconBg="#DFF2E7"
           iconFg="#1F7A5C"
-          value={<MoneyText value={depInterest} />}
-          label="Interest at maturity"
+          value={activeDeposits.length ? <MoneyText value={depAccrued} /> : <>—</>}
+          label="Lãi tích luỹ đến nay"
+          sub={activeDeposits.length ? <>Đáo hạn: <MoneyText value={depInterestMaturity} /></> : "Chưa có sổ active"}
         />
+        {/* G1: empty → "—", không phải 0đ */}
         <MetricCard
           icon="ph-duotone ph-chart-line-up"
-          value={<MoneyText value={stockValue} />}
+          value={hasStock ? <MoneyText value={stockValue} /> : <>—</>}
           label="Stock value"
         />
         <MetricCard
           icon={plUp ? "ph-duotone ph-trend-up" : "ph-duotone ph-trend-down"}
-          iconBg={plUp ? "#DFF2E7" : "#F7E3DC"}
-          iconFg={plUp ? "#1F7A5C" : "#B4573B"}
+          iconBg={hasStock ? (plUp ? "#DFF2E7" : "#F7E3DC") : "#EAF4EE"}
+          iconFg={hasStock ? (plUp ? "#1F7A5C" : "#B4573B") : "#17554A"}
           value={
-            <span style={{ color: plUp ? "#1F7A5C" : "#B4573B" }}>
-              {plUp ? "+" : "−"}
-              <MoneyText value={Math.abs(stockPl)} />
-            </span>
+            hasStock ? (
+              <span style={{ color: plUp ? "#1F7A5C" : "#B4573B" }}>
+                {plUp ? "+" : "−"}
+                <MoneyText value={Math.abs(stockPl)} />
+              </span>
+            ) : (
+              <>—</>
+            )
           }
           label="Unrealized P&L"
         />
       </div>
 
-      <InvestmentsClient monthKey={monthKey} deposits={deposits} positions={positions} accounts={accounts} />
+      <InvestmentsClient
+        monthKey={monthKey}
+        deposits={deposits}
+        positions={positions}
+        history={history}
+        accounts={accounts}
+        earlyRate={earlyRate}
+      />
     </AppShell>
   );
 }

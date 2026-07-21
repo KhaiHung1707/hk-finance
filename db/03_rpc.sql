@@ -153,6 +153,23 @@ begin
     update upwork_contracts set status = 'cancelled' where id = v_ref_id;
   elsif v_ref_table = 'print_orders' then
     update print_orders set status = 'cancelled' where id = v_ref_id;
+  elsif v_ref_table = 'term_deposits' then
+    -- huỷ tất toán: sổ về active, gỡ liên kết tx tất toán.
+    update term_deposits set status = 'active', settle_tx_id = null where id = v_ref_id;
+  elsif v_ref_table = 'stock_trades' then
+    -- huỷ giao dịch cổ phiếu: xoá trade → loại khỏi v_stock_positions.
+    delete from stock_trades where id = v_ref_id;
+  elsif v_ref_table = 'dividends' then
+    delete from dividends where id = v_ref_id;
+  elsif v_ref_table = 'gold_lots' then
+    -- tx mua (purchase) → xoá lô; tx bán (sold) → lô về held, gỡ dữ liệu bán.
+    if exists (select 1 from gold_lots where id = v_ref_id and purchase_tx_id = p_tx_id) then
+      delete from gold_lots where id = v_ref_id;
+    else
+      update gold_lots
+        set status = 'held', sold_tx_id = null, sold_price = null, sold_on = null
+      where id = v_ref_id and sold_tx_id = p_tx_id;
+    end if;
   end if;
 end $$;
 

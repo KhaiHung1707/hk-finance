@@ -10,12 +10,14 @@ export function MetricCard({
   iconFg = "#17554A",
   value,
   label,
+  sub,
 }: {
   icon: string;
   iconBg?: string;
   iconFg?: string;
   value: ReactNode;
   label: string;
+  sub?: ReactNode;
 }) {
   return (
     <div className="bg-card border border-card-border rounded-[18px] p-5">
@@ -27,6 +29,7 @@ export function MetricCard({
       </div>
       <div className="text-[24px] font-extrabold tracking-[-0.6px] mt-[14px] tnum">{value}</div>
       <div className="text-[12px] text-muted mt-[3px] font-medium">{label}</div>
+      {sub != null && <div className="text-[11px] text-faint mt-[5px] tnum">{sub}</div>}
     </div>
   );
 }
