@@ -278,6 +278,49 @@ begin
   return v_tx;
 end $$;
 
+-- create_account: thêm tài khoản mới. type ∈ bank|broker|cash|ewallet|other.
+create or replace function create_account(
+  p_name text, p_type text, p_opening_balance bigint default 0, p_note text default null
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare v_id uuid; v_sort int;
+begin
+  if coalesce(trim(p_name),'') = '' then raise exception 'create_account: cần tên tài khoản'; end if;
+  if p_type not in ('bank','broker','cash','ewallet','other') then
+    raise exception 'create_account: type không hợp lệ (%). Cho phép: bank|broker|cash|ewallet|other', p_type;
+  end if;
+  if p_opening_balance is null or p_opening_balance < 0 then
+    raise exception 'create_account: opening_balance phải >= 0';
+  end if;
+  if exists (select 1 from accounts where name = p_name) then
+    raise exception 'create_account: tên tài khoản đã tồn tại';
+  end if;
+  select coalesce(max(sort),0) + 1 into v_sort from accounts;
+  insert into accounts(name, type, opening_balance, note, sort)
+  values (p_name, p_type, p_opening_balance, p_note, v_sort)
+  returning id into v_id;
+  return v_id;
+end $$;
+
+-- delete_account: xoá tài khoản — CHỈ khi không còn tham chiếu (đúng ERD, giữ
+-- toàn vẹn FK). Nếu còn giao dịch / sổ tiết kiệm trỏ tới → chặn với thông báo rõ.
+create or replace function delete_account(p_id uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare v_tx int; v_dep int;
+begin
+  if not exists (select 1 from accounts where id = p_id) then
+    raise exception 'delete_account: tài khoản không tồn tại';
+  end if;
+  select count(*) into v_tx from transactions
+    where account_id = p_id or counter_account_id = p_id;
+  select count(*) into v_dep from term_deposits where source_account_id = p_id;
+  if v_tx > 0 or v_dep > 0 then
+    raise exception 'delete_account: tài khoản đang được dùng (% giao dịch, % sổ tiết kiệm) — không thể xoá. Chuyển hết tiền đi rồi thử lại.', v_tx, v_dep;
+  end if;
+  delete from accounts where id = p_id;
+end $$;
+
 -- =============================================================================
 -- FUNCTION PRIVILEGES (chạy CUỐI CÙNG — sau khi mọi RPC P1/P2/P3 đã tạo).
 -- Mọi RPC là security definer; Postgres/Supabase mặc định GRANT execute cho

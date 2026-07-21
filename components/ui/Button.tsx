@@ -1,7 +1,7 @@
 "use client";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-type Variant = "primary" | "dark" | "ghost" | "white";
+type Variant = "primary" | "dark" | "ghost" | "white" | "danger";
 
 const base =
   "inline-flex items-center justify-center gap-2 rounded-full font-bold cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-sans";
@@ -11,6 +11,7 @@ const variants: Record<Variant, string> = {
   dark: "bg-primary-dark text-white hover:bg-[#0A211C] border-0",
   white: "bg-white text-primary hover:bg-[#EAF4EE] border-0",
   ghost: "bg-chip text-ink-soft hover:bg-[#E6E0D2] border-0",
+  danger: "bg-[#B4573B] text-white hover:bg-[#9A472F] border-0",
 };
 
 export function Button({

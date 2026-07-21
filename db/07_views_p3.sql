@@ -77,11 +77,11 @@ order by g.purchased_on nulls last;
 create or replace view v_net_worth as
 select
   (select coalesce(sum(balance),0) from v_account_balances)               as cash,
-  (select market_value from v_gold_position)                             as gold,
+  coalesce((select market_value from v_gold_position),0)::bigint          as gold,
   (select coalesce(sum(qty * last_price),0)::bigint from v_stock_positions) as stock,
   (select coalesce(sum(principal),0) from term_deposits where status='active') as deposits,
   (select coalesce(sum(balance),0) from v_account_balances)
-    + (select market_value from v_gold_position)
+    + coalesce((select market_value from v_gold_position),0)::bigint
     + (select coalesce(sum(qty * last_price),0)::bigint from v_stock_positions)
     + (select coalesce(sum(principal),0) from term_deposits where status='active') as total;
 
