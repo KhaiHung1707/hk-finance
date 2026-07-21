@@ -54,3 +54,11 @@ a:hover {
 .tnum {
   font-variant-numeric: tabular-nums;
 }
+
+/* Ẩn thanh cuộn cho nav ngang (vẫn cuộn được bằng trackpad/drag). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

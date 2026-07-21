@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { navItems } from "@/lib/design/tokens";
+import { NavBar } from "@/components/ui/NavBar";
 
 /**
  * Khung chung mọi trang: header band xanh + nav pill + user chip, rồi vùng nội dung
@@ -39,37 +39,16 @@ export function AppShell({
             className="flex items-center justify-between gap-6 py-[18px]"
             style={{ borderBottom: "1px solid rgba(255,255,255,0.10)" }}
           >
-            <div className="flex items-center gap-[10px] flex-shrink-0">
-              <div className="w-9 h-9 rounded-[11px] bg-[#EAF4EE] flex items-center justify-center text-primary text-[19px]">
+            <div className="flex items-center gap-[10px] flex-shrink-0 min-w-0">
+              <div className="w-9 h-9 rounded-[11px] bg-[#EAF4EE] flex items-center justify-center text-primary text-[19px] flex-shrink-0">
                 <i className="ph-duotone ph-coins" aria-hidden />
               </div>
-              <div className="text-[15px] font-extrabold text-white tracking-[-0.3px] whitespace-nowrap">
+              <div className="hidden sm:block text-[15px] font-extrabold text-white tracking-[-0.3px] whitespace-nowrap overflow-hidden text-ellipsis">
                 Everything will BEE ok!! <i className="ph-duotone ph-bee" style={{ color: "#E8C97A" }} aria-hidden />
               </div>
             </div>
 
-            <nav
-              className="flex items-center gap-[2px] rounded-full p-1 flex-1 justify-center min-w-0"
-              style={{ background: "rgba(255,255,255,0.07)" }}
-            >
-              {navItems.map((n) => {
-                const active = n.href === activePath;
-                return (
-                  <Link
-                    key={n.href}
-                    href={n.href}
-                    className={
-                      active
-                        ? "flex items-center gap-[7px] bg-white text-primary rounded-full px-[11px] py-[7px] text-[12px] font-bold whitespace-nowrap"
-                        : "nav-link flex items-center gap-[7px] text-white rounded-full px-[10px] py-[7px] text-[12px] font-semibold whitespace-nowrap hover:bg-white/15 transition-colors"
-                    }
-                  >
-                    <i className={n.icon} aria-hidden />
-                    {n.label}
-                  </Link>
-                );
-              })}
-            </nav>
+            <NavBar activePath={activePath} />
 
             <div className="flex items-center gap-3 flex-shrink-0">
               <Link

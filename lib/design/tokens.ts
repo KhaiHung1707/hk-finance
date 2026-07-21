@@ -66,13 +66,15 @@ export const accountIcon: Record<string, string> = {
 };
 
 /** Màu series theo nguồn thu (Forecast stacked bars / legend). Fallback dùng vòng bảng màu. */
+// 4 nguồn chính dùng 4 hệ màu KHÁC nhau (không phải sắc độ cùng tông) để phân
+// biệt rõ trên stacked bar / legend: xanh lá đậm · xanh dương · cam · tím.
 export const sourceColor: Record<string, string> = {
-  Structure: "#17554A",
-  Upwork: "#8FBCA7",
-  Ecommerce: "#C9A227",
-  Outsource: "#B4573B",
-  "Đầu tư": "#6B7570",
-  Khác: "#C9C0AC",
+  Structure: "#17554A", // xanh lá đậm (brand)
+  Upwork: "#3B7DD8", // xanh dương
+  Ecommerce: "#E08A1E", // cam
+  Outsource: "#8B5CD6", // tím
+  "Đầu tư": "#6B7570", // xám
+  Khác: "#C9C0AC", // be nhạt
 };
 export const chartPalette = ["#17554A", "#8FBCA7", "#C9A227", "#B4573B", "#6B7570", "#C9C0AC"] as const;
 

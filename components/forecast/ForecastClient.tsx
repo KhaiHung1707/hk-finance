@@ -11,6 +11,19 @@ function srcColor(name: string, idx: number): string {
   return sourceColor[name] ?? chartPalette[idx % chartPalette.length];
 }
 
+/** Viết tắt chủ đích cho header cột hẹp (kèm tooltip = tên đầy đủ). */
+const SOURCE_ABBR: Record<string, string> = {
+  Structure: "Struct.",
+  Upwork: "Upwork",
+  Ecommerce: "E-com",
+  Outsource: "Outs.",
+  "Đầu tư": "Đầu tư",
+  Khác: "Khác",
+};
+function srcAbbr(name: string): string {
+  return SOURCE_ABBR[name] ?? (name.length > 7 ? name.slice(0, 6) + "." : name);
+}
+
 /** SVG mini-line cho từng nhóm tài sản. */
 function Spark({ series, color }: { series: number[]; color: string }) {
   const min = Math.min(...series);
@@ -253,10 +266,41 @@ export function ForecastClient({
           ))}
         </svg>
         {r.goalTarget > 0 && (
-          <div className="mt-1 text-[12px] font-semibold" style={{ color: r.goalReachedAt ? "#1F7A5C" : "#A5731F" }}>
-            {r.goalReachedAt
-              ? `🏠 Đạt mục tiêu mua nhà (${fmt(r.goalTarget)}) ~ ${r.goalReachedAt}`
-              : `🏠 Chưa đạt mục tiêu ${fmt(r.goalTarget)} trong ${horizon} tháng — thử horizon dài hơn hoặc scenario cao hơn.`}
+          <div
+            className="mt-3 rounded-[12px] px-4 py-3 flex items-center gap-3 flex-wrap"
+            style={{
+              background: r.goalReachedAt ? "#DFF2E7" : "#FBF0DC",
+              border: `1px solid ${r.goalReachedAt ? "#B6E0C8" : "#EBD9AE"}`,
+            }}
+          >
+            <div
+              className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[18px] flex-shrink-0"
+              style={{
+                background: r.goalReachedAt ? "#C7E9D5" : "#F5E4BE",
+                color: r.goalReachedAt ? "#1F7A5C" : "#A5731F",
+              }}
+            >
+              <i className="ph-duotone ph-house-line" aria-hidden />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <div className="text-[13px] font-extrabold" style={{ color: r.goalReachedAt ? "#1F7A5C" : "#A5731F" }}>
+                {r.goalReachedAt
+                  ? `Đạt mục tiêu mua nhà ~ ${r.goalReachedAt}`
+                  : `Chưa đạt mục tiêu trong ${horizon} tháng tới`}
+              </div>
+              <div className="text-[12px] mt-[2px]" style={{ color: r.goalReachedAt ? "#2C6B54" : "#8A6019" }}>
+                Mục tiêu {full(r.goalTarget)} · {scenarioLabel(scenario)} scenario ·{" "}
+                {r.goalReachedAt ? `còn ${fmt(r.goalTarget)} đã đạt` : `hiện dự phóng ${fmt(r.endTotal)}`}
+              </div>
+            </div>
+            {!r.goalReachedAt && scenarioKeys.includes("aggressive") && scenario !== "aggressive" && (
+              <button
+                onClick={() => setScenario("aggressive")}
+                className="bg-[#A5731F] text-white border-0 rounded-full px-[14px] py-[8px] text-[12px] font-bold cursor-pointer hover:bg-[#8A6019] whitespace-nowrap"
+              >
+                Thử scenario Aggressive
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -388,16 +432,16 @@ export function ForecastClient({
       {/* Monthly breakdown table */}
       <div className="bg-card border border-card-border rounded-[18px] overflow-hidden">
         <div className="px-[22px] pt-[18px] pb-1 text-[15px] font-bold">Monthly breakdown</div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
           <div style={{ minWidth: 920 }}>
             <div
-              className="grid gap-2 items-center px-[22px] py-3 bg-fill-soft text-[11px] font-bold text-muted uppercase tracking-[0.4px]"
+              className="grid gap-2 items-center px-[22px] py-3 bg-fill-soft text-[11px] font-bold text-muted uppercase tracking-[0.4px] sticky top-0 z-10"
               style={{ gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 1.15fr 92px` }}
             >
               <div>Month</div>
               {r.sources.map((s) => (
-                <div key={s.source} className="text-right">
-                  {s.source.slice(0, 6)}
+                <div key={s.source} className="text-right" title={s.source}>
+                  {srcAbbr(s.source)}
                 </div>
               ))}
               <div className="text-right">Income</div>
@@ -406,11 +450,14 @@ export function ForecastClient({
               <div className="text-right">Net worth</div>
               <div className="text-right">MoM</div>
             </div>
-            {r.months.map((m) => (
+            {r.months.map((m, ri) => (
               <div
                 key={m.monthKey}
-                className="grid gap-2 items-center px-[22px] py-[11px] border-t border-divider text-[12.5px] tnum hover:bg-[#FAF8F2]"
-                style={{ gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 1.15fr 92px` }}
+                className="grid gap-2 items-center px-[22px] py-[11px] border-t border-divider text-[12.5px] tnum hover:bg-[#F1EFE6]"
+                style={{
+                  gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 1.15fr 92px`,
+                  background: ri % 2 === 1 ? "#FAF8F2" : undefined,
+                }}
                 title={`${m.monthKey}: mở ${full(m.opening)} · tiết kiệm ${full(m.savings)} · lãi ${full(m.return_)} · đóng ${full(m.closing)}`}
               >
                 <div className="font-bold text-ink-soft">{m.monthKey}</div>
@@ -458,33 +505,56 @@ function AssumptionInput({
   onCommit: (v: number) => void;
 }) {
   const [text, setText] = useState(String(Math.round(value)));
+  const [focused, setFocused] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const grouped = new Intl.NumberFormat("en-US").format(Math.round(Number(text) || 0));
+  // Khi focus: cho gõ số thô. Khi blur: hiện số có dấu phân cách để dễ đọc số lớn.
+  const display = focused ? text : grouped;
+
+  // Viền theo trạng thái: vàng nhạt = ước lượng, xanh = đã xác nhận, primary khi focus.
+  const borderColor = focused ? "#17554A" : isAssumption ? "#E4C878" : "#9CC6B4";
+
   return (
-    <label className="border border-[#EFEAE0] rounded-[14px] p-4 flex flex-col gap-[7px]">
+    <label
+      className="rounded-[14px] p-4 flex flex-col gap-[7px]"
+      style={{ border: `1px solid ${isAssumption ? "#F0E2BC" : "#DDECE4"}`, background: isAssumption ? "#FEFBF3" : "#FFFFFF" }}
+    >
       <div className="flex items-center gap-2">
         <span className="text-[13px] font-bold flex-1">{label}</span>
-        {isAssumption && (
-          <span className="text-[10px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-2 py-[2px]">
+        {isAssumption ? (
+          <span className="flex items-center gap-1 text-[10px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-2 py-[2px]">
+            <i className="ph-duotone ph-warning-circle" aria-hidden />
             ước lượng
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[10px] font-bold text-[#1F7A5C] bg-[#DFF2E7] rounded-full px-2 py-[2px]">
+            <i className="ph-duotone ph-check-circle" aria-hidden />
+            đã xác nhận
           </span>
         )}
       </div>
       <input
-        type="number"
-        value={text}
+        type="text"
+        inputMode="numeric"
+        value={display}
+        onFocus={() => setFocused(true)}
         onChange={(e) => {
-          setText(e.target.value);
-          onLocalChange(Math.round(Number(e.target.value) || 0));
+          // chỉ giữ chữ số (bỏ dấu phẩy người dùng hoặc format dán vào)
+          const raw = e.target.value.replace(/[^\d]/g, "");
+          setText(raw);
+          onLocalChange(Math.round(Number(raw) || 0));
         }}
         onBlur={async () => {
+          setFocused(false);
           const v = Math.round(Number(text) || 0);
           if (v === Math.round(value) && !isAssumption) return;
           setSaving(true);
           await onCommit(v);
           setSaving(false);
         }}
-        className="border border-card-border rounded-[10px] px-3 py-[9px] text-[14px] font-bold tnum outline-none focus:border-primary bg-white w-full"
+        className="rounded-[10px] px-3 py-[9px] text-[14px] font-bold tnum outline-none bg-white w-full transition-colors"
+        style={{ border: `1.5px solid ${borderColor}` }}
       />
       <span className="text-[11px] text-muted">{saving ? "Đang lưu…" : full(value) + "/tháng"}</span>
     </label>
