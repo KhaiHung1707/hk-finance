@@ -11,6 +11,13 @@ function srcColor(name: string, idx: number): string {
   return sourceColor[name] ?? chartPalette[idx % chartPalette.length];
 }
 
+const GROUP_ICON: Record<string, string> = {
+  cash: "ph-duotone ph-wallet",
+  gold: "ph-duotone ph-coins",
+  stock: "ph-duotone ph-chart-line-up",
+  deposits: "ph-duotone ph-vault",
+};
+
 /** Viết tắt chủ đích cho header cột hẹp (kèm tooltip = tên đầy đủ). */
 const SOURCE_ABBR: Record<string, string> = {
   Structure: "Struct.",
@@ -118,68 +125,89 @@ export function ForecastClient({
 
   return (
     <>
-      {/* Selector ở header band */}
+      {/* Selector ở header band — segmented pill có nhãn HORIZON / SCENARIO */}
       <HeaderPortal>
-        <div className="flex items-center gap-[6px] rounded-full p-1" style={{ background: "rgba(255,255,255,0.07)" }}>
+        <div className="flex items-center gap-[7px] rounded-full p-1 pl-3" style={{ background: "rgba(255,255,255,0.07)" }}>
+          <span className="text-[10px] font-extrabold tracking-[0.6px] text-white/60">HORIZON</span>
+          {params.horizonOptions.map((h) => (
+            <button key={h} onClick={() => setHorizon(h)} className={pill(horizon === h)}>
+              {h}M
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-[7px] rounded-full p-1 pl-3" style={{ background: "rgba(255,255,255,0.07)" }}>
+          <span className="text-[10px] font-extrabold tracking-[0.6px] text-white/60">SCENARIO</span>
           {scenarioKeys.map((k) => (
             <button key={k} onClick={() => setScenario(k)} className={pill(scenario === k)}>
               {scenarioLabel(k)}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-[6px] rounded-full p-1" style={{ background: "rgba(255,255,255,0.07)" }}>
-          {params.horizonOptions.map((h) => (
-            <button key={h} onClick={() => setHorizon(h)} className={pill(horizon === h)}>
-              {h}mo
-            </button>
-          ))}
-        </div>
       </HeaderPortal>
 
-      {/* Summary stat cards */}
-      <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
-        <SummaryCard
-          icon="ph-duotone ph-trophy"
-          label={`Net worth in ${horizon}mo`}
-          value={fmt(r.endTotal)}
-          hint={`${full(r.endTotal)} · +${r.totalGrowthPct.toFixed(1)}% so với ${full(r.startTotal)}`}
-        />
+      {/* KPI row — card 1 là hero (accent-tinted gradient + accent border) */}
+      <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
+        {/* Hero */}
+        <div
+          className="rounded-[18px] p-5"
+          style={{
+            background: "linear-gradient(135deg, #EAF4EE 0%, #F5FAF7 100%)",
+            border: "1.5px solid #17554A",
+          }}
+        >
+          <div className="w-[38px] h-[38px] rounded-[12px] flex items-center justify-center text-[19px] bg-[#D6E9DE] text-primary">
+            <i className="ph-duotone ph-trophy" aria-hidden />
+          </div>
+          <div className="text-[24px] font-extrabold tracking-[-0.6px] mt-[14px] tnum text-primary" title={full(r.endTotal)}>
+            {fmt(r.endTotal)}
+          </div>
+          <div className="text-[12px] text-ink-soft mt-[3px] font-semibold">Net worth in {horizon}M</div>
+          <div className="inline-flex items-center gap-[4px] mt-[10px] text-[12px] font-extrabold text-[#1F7A5C] bg-[#DFF2E7] rounded-full px-[10px] py-[3px]">
+            <i className="ph-fill ph-caret-up" aria-hidden />
+            +{fmt(r.totalGrowth)} vs hôm nay
+          </div>
+        </div>
+
         <SummaryCard
           icon="ph-duotone ph-trend-up"
           iconBg="#DFF2E7"
           iconFg="#1F7A5C"
-          label="Total growth"
-          value={`+${fmt(r.totalGrowth)}`}
-          hint={`Tăng trưởng kép ${r.avgMonthlyPct.toFixed(2)}%/tháng`}
+          label="Avg monthly growth"
+          value={`${r.avgMonthlyPct >= 0 ? "+" : ""}${r.avgMonthlyPct.toFixed(2)}%`}
+          hint={`Tăng trưởng kép/tháng qua ${horizon} tháng`}
           valueColor="#1F7A5C"
         />
         <SummaryCard
           icon="ph-duotone ph-coins"
-          label="Total income"
+          label={`Total income · ${horizon}M`}
           value={fmt(r.totalIncome)}
           hint={`Thu ${full(r.totalIncome)} · chi ${full(r.totalExpense)} · net ${full(r.totalIncome - r.totalExpense)}`}
         />
         <SummaryCard
-          icon="ph-duotone ph-house-line"
-          iconBg={r.goalReachedAt ? "#DFF2E7" : "#FBF0DC"}
-          iconFg={r.goalReachedAt ? "#1F7A5C" : "#A5731F"}
-          label="Mục tiêu nhà"
-          value={r.goalTarget > 0 ? fmt(r.goalTarget) : "—"}
-          hint={
-            r.goalTarget <= 0
-              ? "Chưa đặt mục tiêu (Settings → house_goal)"
-              : r.goalReachedAt
-                ? `Đạt mục tiêu ~ ${r.goalReachedAt}`
-                : `Chưa đạt trong ${horizon} tháng tới`
-          }
-          valueColor={r.goalReachedAt ? "#1F7A5C" : undefined}
+          icon="ph-duotone ph-chart-line-up"
+          iconBg="#DFF2E7"
+          iconFg="#1F7A5C"
+          label={`Investment gain · ${horizon}M`}
+          value={`${r.investGain >= 0 ? "+" : "−"}${fmt(Math.abs(r.investGain))}`}
+          hint={`Phần tăng nhờ lãi tài sản (ngoài tiết kiệm)`}
+          valueColor="#1F7A5C"
         />
       </div>
 
+      {/* Chart + Asset-class growth — 2 cột (stack < lg) */}
+      <div className="grid gap-[14px] items-stretch grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
       {/* Net-worth curve */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="text-[15px] font-bold">Net-worth projection — {scenarioLabel(scenario)}</div>
+          <div className="flex items-center gap-2">
+            <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+              <i className="ph-duotone ph-chart-line" aria-hidden />
+            </div>
+            <div className="text-[15px] font-bold">Net-worth projection — {horizon}M</div>
+            <span className="text-[11px] font-bold text-primary bg-[#EAF4EE] rounded-full px-[10px] py-[3px]">
+              {scenarioLabel(scenario)}
+            </span>
+          </div>
           <div className="flex items-center gap-3 text-[11px] text-muted">
             {r.goalTarget > 0 && (
               <span className="flex items-center gap-[5px]">
@@ -195,7 +223,12 @@ export function ForecastClient({
             )}
           </div>
         </div>
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }}>
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height: 260 }}>
+          <defs>
+            <filter id="nwglow" x="-4%" y="-20%" width="108%" height="140%">
+              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#17554A" floodOpacity="0.25" />
+            </filter>
+          </defs>
           {[0, 1 / 3, 2 / 3, 1].map((t, i) => {
             const v = min + (max - min) * t;
             return (
@@ -219,7 +252,7 @@ export function ForecastClient({
             </>
           )}
 
-          <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+          <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" filter="url(#nwglow)" />
 
           {/* Receivables marker tháng 1 */}
           {showReceivables && (
@@ -332,48 +365,84 @@ export function ForecastClient({
         </div>
       </div>
 
-      {/* Per-asset-group growth */}
-      <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
-        {r.groups.map((g) => {
-          const empty = g.series[0] <= 0 && g.series[g.series.length - 1] <= 0;
-          const up = g.series[g.series.length - 1] >= g.series[0];
-          return (
-            <div key={g.key} className="bg-card border border-card-border rounded-[14px] p-4">
-              <div className="flex items-center gap-2">
-                <div className="w-[11px] h-[11px] rounded-[3px]" style={{ background: groupColor[g.key] }} />
-                <div className="text-[13px] font-bold flex-1">{g.label}</div>
+      {/* Cột phải — Asset-class growth */}
+      <div className="bg-card border border-card-border rounded-[18px] p-[22px] flex flex-col">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+            <i className="ph-duotone ph-chart-donut" aria-hidden />
+          </div>
+          <div className="text-[15px] font-bold">Asset-class growth</div>
+        </div>
+        <div className="flex flex-col gap-[10px]">
+          {r.groups.map((g) => {
+            const start = g.series[0];
+            const end = g.series[g.series.length - 1];
+            const empty = start <= 0 && end <= 0;
+            const up = end >= start;
+            return (
+              <div
+                key={g.key}
+                className="bg-fill-soft rounded-[12px] p-3 flex items-center gap-3"
+                title={
+                  empty
+                    ? `${g.label}: chưa có`
+                    : `${g.label}: ${full(start)} → ${full(end)} (${up ? "+" : "−"}${Math.abs(g.growthPct).toFixed(1)}%)`
+                }
+              >
+                <div
+                  className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[16px] flex-shrink-0"
+                  style={{ background: `${groupColor[g.key]}22`, color: groupColor[g.key] }}
+                >
+                  <i className={GROUP_ICON[g.key]} aria-hidden />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[13px] font-bold">{g.label}</span>
+                    <span className="text-[14px] font-extrabold tnum" title={full(end)}>
+                      {empty ? "—" : fmt(end)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-faint tnum">
+                    {empty ? "chưa có" : `${fmt(start)} → ${horizon}M`}
+                  </div>
+                </div>
+                {!empty && (
+                  <div className="w-[64px] flex-shrink-0">
+                    <Spark series={g.series} color={groupColor[g.key]} />
+                  </div>
+                )}
                 {!empty && (
                   <span
-                    className="text-[11px] font-extrabold rounded-full px-2 py-[3px]"
-                    style={{
-                      background: up ? "#DFF2E7" : "#F7E3DC",
-                      color: up ? "#1F7A5C" : "#B4573B",
-                    }}
+                    className="text-[11px] font-extrabold rounded-full px-2 py-[3px] flex-shrink-0"
+                    style={{ background: up ? "#DFF2E7" : "#F7E3DC", color: up ? "#1F7A5C" : "#B4573B" }}
                   >
-                    {up ? "▲ " : "▼ "}
-                    {g.series[0] > 0 ? Math.abs(g.growthPct).toFixed(1) + "%" : "new"}
+                    {start > 0 ? `${up ? "▲" : "▼"} ${Math.abs(g.growthPct).toFixed(1)}%` : "new"}
                   </span>
                 )}
               </div>
-              {empty ? (
-                <div className="text-[20px] font-extrabold my-2 text-faint">—</div>
-              ) : (
-                <>
-                  <div className="text-[20px] font-extrabold my-2 tnum" title={full(g.series[g.series.length - 1])}>
-                    {fmt(g.series[g.series.length - 1])}
-                  </div>
-                  <Spark series={g.series} color={groupColor[g.key]} />
-                </>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+      </div>
       </div>
 
       {/* Revenue per source + stacked bars */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
-        <div className="text-[15px] font-bold mb-4">Revenue by source over {horizon} months</div>
-        <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+              <i className="ph-duotone ph-coins" aria-hidden />
+            </div>
+            <div className="text-[15px] font-bold">Revenue by source · {horizon}M</div>
+          </div>
+          <div className="text-[13px]">
+            <span className="text-muted">Total </span>
+            <span className="font-extrabold text-ink tnum" title={full(r.totalIncome)}>
+              {fmt(r.totalIncome)}
+            </span>
+          </div>
+        </div>
+        <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))" }}>
           {r.sources.map((s, i) => (
             <div
               key={s.source}
