@@ -65,23 +65,26 @@ export const accountIcon: Record<string, string> = {
   other: "ph-duotone ph-buildings",
 };
 
-/** Màu series theo nguồn thu (Forecast stacked bars / legend). Fallback dùng vòng bảng màu. */
+/**
+ * Màu series theo nguồn thu — categorical palette đạt chuẩn CVD (colorblind-safe,
+ * verified bằng dataviz validator: light mode ALL PASS). Gán theo entity, thứ tự cố định.
+ */
 export const sourceColor: Record<string, string> = {
-  Structure: "#17554A",
-  Upwork: "#8FBCA7",
-  Ecommerce: "#C9A227",
-  Outsource: "#B4573B",
-  "Đầu tư": "#6B7570",
-  Khác: "#C9C0AC",
+  Structure: "#2a78d6", // blue
+  Ecommerce: "#008300", // green
+  Outsource: "#e87ba4", // magenta
+  Upwork: "#eda100", // amber
+  "Đầu tư": "#1baf7a", // aqua
+  Khác: "#8b5cf6", // purple
 };
-export const chartPalette = ["#17554A", "#8FBCA7", "#C9A227", "#B4573B", "#6B7570", "#C9C0AC"] as const;
+export const chartPalette = ["#2a78d6", "#008300", "#e87ba4", "#eda100", "#1baf7a", "#8b5cf6"] as const;
 
-/** Màu theo nhóm tài sản (Assets/Forecast). */
+/** Màu theo nhóm tài sản (Assets/Forecast) — cùng hệ categorical đã verify. */
 export const groupColor: Record<string, string> = {
-  cash: "#17554A",
-  gold: "#8FBCA7",
-  stock: "#C9A227",
-  deposits: "#6B7570",
+  cash: "#2a78d6", // blue
+  gold: "#eda100", // amber
+  stock: "#008300", // green
+  deposits: "#8b5cf6", // purple
 };
 
 export const radius = { sm: 9, md: 12, card: 16, cardLg: 18, modal: 20, pill: 999 } as const;

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { fmt, full } from "@/lib/format";
 import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { LineChart, type ChartSeries } from "@/components/ui/LineChart";
 import { runForecast } from "@/lib/forecast";
 import { setForecastPlanValue } from "@/lib/actions/settings";
 import type { ForecastParams, ForecastStart, ForecastSnapshot } from "@/lib/queries/forecast";
@@ -99,7 +100,14 @@ export function ForecastClient({
   const line = r.nwSeries.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
   const area = `46,${H - 10} ${line} ${W},${H - 10}`;
   const tickIdx = [...new Set([0, Math.round(horizon / 3), Math.round((2 * horizon) / 3), horizon])];
-  const maxIncome = Math.max(...r.months.map((m) => m.income), 1);
+  // Revenue by source → multi-line: mỗi nguồn 1 đường, values theo tháng.
+  const revenueLabels = r.months.map((m) => m.monthKey);
+  const revenueSeries: ChartSeries[] = r.sources.map((s, i) => ({
+    key: s.source,
+    label: s.source,
+    color: srcColor(s.source, i),
+    values: r.months.map((m) => m.bySource[s.source] ?? 0),
+  }));
 
   // receivables landing tháng 1 (index 1 trong series)
   const showReceivables = params.receivablesLandFirstMonth && start.receivablesFirstMonth > 0 && horizon >= 1;
@@ -466,35 +474,14 @@ export function ForecastClient({
           ))}
         </div>
 
-        {/* Stacked monthly bars */}
+        {/* Multi-line theo tháng — hover tooltip + crosshair + toggle line/bar + legend */}
         <div className="mt-6">
-          <div className="flex items-end gap-[2.2%] h-[150px]">
-            {r.months.map((m) => (
-              <div key={m.monthKey} className="flex-1 flex flex-col justify-end items-center gap-[5px] h-full">
-                <div className="w-full max-w-[34px] flex flex-col justify-end h-full rounded-[5px] overflow-hidden">
-                  {r.sources.map((s, i) => {
-                    const v = m.bySource[s.source] ?? 0;
-                    return (
-                      <div
-                        key={s.source}
-                        style={{ background: srcColor(s.source, i), height: `${(v / maxIncome) * 150}px` }}
-                        title={`${m.monthKey} · ${s.source}: ${full(v)}`}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="text-[9.5px] text-faint font-semibold">{m.monthKey.split("/")[0]}</div>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-5 flex-wrap mt-[14px]">
-            {r.sources.map((s, i) => (
-              <div key={s.source} className="flex items-center gap-[7px] text-[12px] text-ink-soft">
-                <div className="w-[9px] h-[9px] rounded-[2px]" style={{ background: srcColor(s.source, i) }} />
-                {s.source}
-              </div>
-            ))}
-          </div>
+          <LineChart
+            labels={revenueLabels}
+            series={revenueSeries}
+            height={280}
+            ariaLabel="Doanh thu theo nguồn qua từng tháng"
+          />
         </div>
       </div>
 

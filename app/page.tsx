@@ -3,6 +3,7 @@ import { AppShell } from "@/components/ui/AppShell";
 import { StatCard } from "@/components/ui/StatCard";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { Badge } from "@/components/ui/Badge";
+import { LineChart } from "@/components/ui/LineChart";
 import { ReceivablesCard } from "@/components/dashboard/ReceivablesCard";
 import { CloseMonthButton } from "@/components/dashboard/CloseMonthButton";
 import { accountIcon } from "@/lib/design/tokens";
@@ -55,13 +56,6 @@ export default async function DashboardPage() {
     const hit = fc.months.find((m) => m.netWorth >= houseGoal.down_payment);
     goalMonth = hit ? hit.monthKey : fc.months.length ? `sau ${fc.monthKeys[fc.monthKeys.length - 1]}` : null;
   }
-  const fcMin = Math.min(...fc.nwSeries);
-  const fcMax = Math.max(...fc.nwSeries);
-  const fcSpan = fcMax - fcMin || 1;
-  const fcPts = fc.nwSeries
-    .map((v, i) => `${((i / (fc.nwSeries.length - 1)) * 292 + 4).toFixed(1)},${(78 - ((v - fcMin) / fcSpan) * 66).toFixed(1)}`)
-    .join(" ");
-
   const receivedT = summary?.received ?? 0;
   const pendingT = summary?.pending ?? 0;
   const expenseT = summary?.expense ?? 0;
@@ -259,13 +253,13 @@ export default async function DashboardPage() {
             </span>
             <span className="text-[12px] text-muted">in 12 months · +{fc.totalGrowthPct.toFixed(1)}%</span>
           </div>
-          <svg viewBox="0 0 300 84" className="w-full" style={{ height: 84 }}>
-            <line x1={2} y1={80} x2={298} y2={80} stroke="#EFEAE0" strokeWidth={1} />
-            <line x1={2} y1={45} x2={298} y2={45} stroke="#EFEAE0" strokeWidth={1} strokeDasharray="3 4" />
-            <line x1={2} y1={10} x2={298} y2={10} stroke="#EFEAE0" strokeWidth={1} strokeDasharray="3 4" />
-            <polygon points={`4,80 ${fcPts} 296,80`} fill="#EAF4EE" />
-            <polyline points={fcPts} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" />
-          </svg>
+          <LineChart
+            labels={fc.monthKeys}
+            series={[{ key: "nw", label: "Net worth", color: "#17554A", values: fc.nwSeries }]}
+            height={130}
+            allowBar={false}
+            ariaLabel="Dự phóng tài sản ròng 12 tháng"
+          />
           {houseGoal.down_payment > 0 && (
             <div className="mt-auto border-t border-divider pt-4">
               <div className="flex justify-between text-[12px] text-ink-soft mb-[9px]">
