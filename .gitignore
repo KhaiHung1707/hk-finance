@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+
+# Số liệu tài chính thật — KHÔNG commit lên repo public.
+data/seed-data.json

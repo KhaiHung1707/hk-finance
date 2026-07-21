@@ -1,0 +1,90 @@
+{
+  "_meta": {
+    "generated": "2026-01-01",
+    "source": "TEMPLATE — copy sang data/seed-data.json rồi điền số thật (file thật KHÔNG commit).",
+    "note": "Single source of truth for starting numbers. amounts in VND (bigint). Fields with assumption=true are estimates. NO other file in the app may contain money literals.",
+    "baseline_month_key": "T7/26"
+  },
+
+  "income_sources": [
+    { "name": "Structure",  "kind": "agency",    "sort": 1 },
+    { "name": "Upwork",     "kind": "freelance", "sort": 2 },
+    { "name": "Ecommerce",  "kind": "product",   "sort": 3 },
+    { "name": "Outsource",  "kind": "agency",    "sort": 4 },
+    { "name": "Đầu tư",     "kind": "investment","sort": 5 },
+    { "name": "Khác",       "kind": "other",     "sort": 6 }
+  ],
+
+  "expense_categories": [
+    { "name": "Sinh hoạt", "sort": 1 },
+    { "name": "Ăn uống",   "sort": 2 },
+    { "name": "Đi lại",    "sort": 3 },
+    { "name": "Công việc", "sort": 4 },
+    { "name": "Vật tư in 3D", "sort": 5 },
+    { "name": "Đầu tư",    "sort": 6 },
+    { "name": "Khác",      "sort": 7 }
+  ],
+
+  "accounts": [
+    { "name": "Ngân hàng chính", "type": "bank",    "opening_balance": 0 },
+    { "name": "TK chứng khoán",  "type": "broker",  "opening_balance": 0 },
+    { "name": "Tiền mặt",        "type": "cash",    "opening_balance": 0 }
+  ],
+
+  "term_deposits": [],
+  "_term_deposits_note": "Sổ mở trước khi có app → source_account null, không sinh transaction mở sổ.",
+
+  "gold_lots": [],
+  "_gold_lots_note": "Mua trước app → purchase_tx null. unit_cost = total_cost/quantity.",
+
+  "stock_trades": [],
+  "filaments": [],
+
+  "pending_transactions": [],
+  "_pending_note": "Income pending (account null) → nổi ở Receivables. Ví dụ: { \"type\":\"income\",\"status\":\"pending\",\"amount\":0,\"month_key\":\"T7/26\",\"source\":\"Structure\",\"note\":\"...\" }",
+
+  "projects": [],
+  "_projects_note": "contract_value để trống → điền qua UI. currency: VND | CAD | USD.",
+
+  "upwork_contracts": [],
+
+  "market_prices": [
+    { "asset_key": "gold_ring", "price": 0, "as_of": "2026-01-01", "note": "VND/chỉ — cập nhật giá thật" }
+  ],
+
+  "fx_rates": [
+    { "ccy": "USD", "rate": 0, "as_of": "2026-01-01", "assumption": true },
+    { "ccy": "CAD", "rate": 0, "as_of": "2026-01-01", "assumption": true }
+  ],
+
+  "settings": {
+    "allocation_targets": { "cash": 0.30, "gold": 0.30, "stock": 0.40 },
+    "upwork_fee_pct": 0.10,
+    "deposit_default_rate": { "value": 0.05, "assumption": true },
+    "forecast": {
+      "plan_income_monthly": {
+        "Structure": { "value": 0, "assumption": true },
+        "Upwork":    { "value": 0, "assumption": true },
+        "Ecommerce": { "value": 0, "assumption": true },
+        "Outsource": { "value": 0, "assumption": true }
+      },
+      "plan_expense_monthly": { "value": 0, "assumption": true },
+      "scenarios": {
+        "conservative": { "income_pct": 0.70, "annual_return": 0.04 },
+        "base":         { "income_pct": 1.00, "annual_return": 0.08 },
+        "aggressive":   { "income_pct": 1.10, "annual_return": 0.12 }
+      },
+      "group_returns_annual": {
+        "cash": 0.00, "deposit": 0.05, "gold": 0.08, "stock": 0.10,
+        "assumption": true
+      },
+      "horizon_months_options": [1, 6, 12],
+      "receivables_land_in_first_month": true
+    },
+    "house_goal": { "down_payment": 0, "target_year": 2028 },
+    "timezone": "Asia/Ho_Chi_Minh",
+    "locale": "vi-VN"
+  },
+
+  "month_keys_seed": { "from": "T7/26", "to": "T12/28" }
+}

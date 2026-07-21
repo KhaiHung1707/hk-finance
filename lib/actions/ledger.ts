@@ -1,0 +1,115 @@
+"use server";
+import { revalidatePath } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { positive, guard } from "@/lib/validate";
+
+/**
+ * Server actions — chỉ gọi RPC (không tự UPDATE balance). RPC là nơi duy nhất
+ * ghi transactions; view tự phản ánh. Sau mỗi mutation revalidate Ledger + Dashboard.
+ */
+
+function revalidate() {
+  revalidatePath("/ledger");
+  revalidatePath("/");
+}
+
+export async function recordIncome(input: {
+  sourceId: string;
+  amount: number;
+  monthKey: string;
+  status: "pending" | "received";
+  accountId: string | null;
+  note?: string;
+}) {
+  return guard(async () => {
+    const amount = positive(input.amount, "amount");
+    const sb = await createClient();
+    const { error } = await sb.rpc("record_income", {
+      p_source_id: input.sourceId,
+      p_amount: amount,
+      p_month_key: input.monthKey,
+      p_status: input.status,
+      p_account_id: input.status === "received" ? input.accountId : null,
+      p_note: input.note ?? null,
+    });
+    if (error) return { ok: false, error: error.message };
+    revalidate();
+    return { ok: true };
+  });
+}
+
+export async function recordExpense(input: {
+  categoryId: string;
+  amount: number;
+  monthKey: string;
+  accountId: string;
+  note?: string;
+}) {
+  return guard(async () => {
+    const amount = positive(input.amount, "amount");
+    const sb = await createClient();
+    const { error } = await sb.rpc("record_expense", {
+      p_category_id: input.categoryId,
+      p_amount: amount,
+      p_month_key: input.monthKey,
+      p_account_id: input.accountId,
+      p_note: input.note ?? null,
+    });
+    if (error) return { ok: false, error: error.message };
+    revalidate();
+    return { ok: true };
+  });
+}
+
+export async function recordTransfer(input: {
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  monthKey: string;
+  note?: string;
+}) {
+  return guard(async () => {
+    const amount = positive(input.amount, "amount");
+    if (input.fromAccountId === input.toAccountId) {
+      return { ok: false, error: "Tài khoản nguồn và đích phải khác nhau" };
+    }
+    const sb = await createClient();
+    const { error } = await sb.rpc("record_transfer", {
+      p_from_account: input.fromAccountId,
+      p_to_account: input.toAccountId,
+      p_amount: amount,
+      p_month_key: input.monthKey,
+      p_note: input.note ?? null,
+    });
+    if (error) return { ok: false, error: error.message };
+    revalidate();
+    return { ok: true };
+  });
+}
+
+export async function markReceived(txId: string, accountId: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("mark_received", {
+    p_tx_id: txId,
+    p_account_id: accountId,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
+
+export async function cancelTransaction(txId: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("cancel_transaction", { p_tx_id: txId });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
+
+export async function closeMonth(monthKey: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("close_month", { p_month_key: monthKey });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
