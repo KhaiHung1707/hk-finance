@@ -53,6 +53,12 @@ export function LineChart({
     return mx || 1;
   }, [shown]);
 
+  // giá trị an toàn (0 nếu series ngắn hơn labels / thiếu điểm) — tránh NaN toạ độ.
+  const valAt = (s: ChartSeries, i: number) => {
+    const v = s.values[i];
+    return Number.isFinite(v) ? v : 0;
+  };
+
   // vị trí theo % (0..100) trong vùng vẽ — dùng chung cho SVG và overlay HTML.
   const xPct = (i: number) => (n <= 1 ? 50 : (i / (n - 1)) * 100);
   const yPct = (v: number) => PADY.t + (1 - v / yMax) * (100 - PADY.t - PADY.b);
@@ -85,8 +91,10 @@ export function LineChart({
     });
   }
 
+  // Bề rộng 1 thanh: nhóm chiếm tối đa 72% ô-tháng, chia đều cho số series đang
+  // hiển thị → tổng nhóm KHÔNG bao giờ vượt ô, không chồng sang tháng kế (kể cả horizon dài).
   const barGroupW = n > 0 ? 100 / n : 100;
-  const barW = shown.length > 0 ? Math.max(1.5, (barGroupW * 0.6) / shown.length) : 1.5;
+  const barW = shown.length > 0 ? (barGroupW * 0.72) / shown.length : barGroupW * 0.72;
 
   const tipLeftPct = hoverX != null ? xPct(hoverX) : 0;
   const tipOnRight = tipLeftPct > 58;
@@ -195,7 +203,7 @@ export function LineChart({
 
             {mode === "line"
               ? shown.map((s) => {
-                  const pts = s.values.map((v, i) => `${xPct(i).toFixed(2)},${yPct(v).toFixed(2)}`).join(" ");
+                  const pts = labels.map((_, i) => `${xPct(i).toFixed(2)},${yPct(valAt(s, i)).toFixed(2)}`).join(" ");
                   const area = `${xPct(0).toFixed(2)},${yPct(0)} ${pts} ${xPct(n - 1).toFixed(2)},${yPct(0)}`;
                   return (
                     <g key={s.key}>
@@ -216,7 +224,7 @@ export function LineChart({
                   <g key={i}>
                     {shown.map((s, si) => {
                       const bx = xPct(i) - (shown.length * barW) / 2 + si * barW;
-                      const by = yPct(s.values[i]);
+                      const by = yPct(valAt(s, i));
                       const bh = Math.max(0, yPct(0) - by);
                       return (
                         <rect
@@ -257,7 +265,7 @@ export function LineChart({
                 className="absolute w-[9px] h-[9px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none"
                 style={{
                   left: `${xPct(hoverX)}%`,
-                  top: `${(yPct(s.values[hoverX]) / 100) * height}px`,
+                  top: `${(yPct(valAt(s, hoverX)) / 100) * height}px`,
                   background: s.color,
                 }}
               />
@@ -281,7 +289,8 @@ export function LineChart({
               style={{
                 left: tipOnRight ? undefined : `calc(${tipLeftPct}% + 12px)`,
                 right: tipOnRight ? `calc(${100 - tipLeftPct}% + 12px)` : undefined,
-                minWidth: 168,
+                minWidth: 150,
+                maxWidth: "min(240px, 70%)",
                 boxShadow: "0 12px 32px rgba(14,44,38,0.16)",
               }}
             >
@@ -291,8 +300,8 @@ export function LineChart({
                   <div key={s.key} className="flex items-center gap-2 text-[12px]">
                     <span className="w-[12px] h-[3px] rounded-full flex-shrink-0" style={{ background: s.color }} />
                     <span className="text-ink-soft">{s.label}</span>
-                    <span className="ml-auto font-extrabold text-ink tnum" title={full(s.values[hoverX])}>
-                      {fmt(s.values[hoverX])}
+                    <span className="ml-auto font-extrabold text-ink tnum" title={full(valAt(s, hoverX))}>
+                      {fmt(valAt(s, hoverX))}
                     </span>
                   </div>
                 ))}
