@@ -4,6 +4,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { Badge } from "@/components/ui/Badge";
 import { NetWorthChart } from "@/components/forecast/NetWorthChart";
+import { DashboardForecast } from "@/components/dashboard/DashboardForecast";
 import { ReceivablesCard } from "@/components/dashboard/ReceivablesCard";
 import { CloseMonthButton } from "@/components/dashboard/CloseMonthButton";
 import { accountIcon } from "@/lib/design/tokens";
@@ -286,6 +287,9 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Forecast island — Horizon/Scenario · KPI · Revenue · Asset-class growth */}
+      <DashboardForecast params={fcParams} start={fcStart} />
     </AppShell>
   );
 }
