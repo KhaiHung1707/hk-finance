@@ -214,6 +214,7 @@ export function ProjectsClient({
             <div className="mt-4 flex gap-2 flex-wrap">
               {p.milestones.map((m) => {
                 const mi = msIcon[m.status];
+                const locked = m.amount_vnd != null; // billed/received → fx đã khoá
                 const vnd = m.amount_vnd ?? Math.round(m.amount * (fx[p.currency] ?? 1));
                 return (
                   <div
@@ -230,6 +231,12 @@ export function ProjectsClient({
                       <div className="text-[12px] font-semibold">{m.name}</div>
                       <div className="text-[11px] text-muted tnum" title={full(vnd)}>
                         {ccy(m.amount, p.currency)} · {fmt(vnd)}
+                        {p.currency !== "VND" && (
+                          <span className="text-faint">
+                            {" "}
+                            · {locked ? `@ ${new Intl.NumberFormat("en-US").format(m.fx_rate ?? 0)}` : "ước tính"}
+                          </span>
+                        )}
                       </div>
                     </div>
                     {m.status === "draft" && (

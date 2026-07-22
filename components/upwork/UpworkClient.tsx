@@ -123,6 +123,7 @@ export function UpworkClient({
         {contracts.map((c) => {
           const sm = statusStyle[c.status];
           const feeUsd = c.amount_usd ? c.amount_usd * c.fee_pct : 0;
+          const locked = c.amount_vnd != null; // billed/received → VND & fx đã khoá
           const netVnd = c.amount_vnd ?? (c.net_usd ? c.net_usd * fxUsd : 0);
           return (
             <div
@@ -139,13 +140,29 @@ export function UpworkClient({
               </div>
               <div className="text-right font-bold tnum">{c.amount_usd ? usd(c.amount_usd) : "—"}</div>
               <div className="text-right tnum text-[#B4573B]">
-                {c.amount_usd ? "−" + usd(feeUsd) : "—"}
+                {c.amount_usd ? (
+                  <>
+                    −{usd(feeUsd)}
+                    <div className="text-[10px] text-faint">{pct(c.fee_pct, 0)}</div>
+                  </>
+                ) : (
+                  "—"
+                )}
               </div>
               <div className="text-right font-bold tnum text-[#1F7A5C]">
                 {c.net_usd ? usd(c.net_usd) : "—"}
               </div>
               <div className="text-right tnum" title={full(netVnd)}>
-                {c.status === "cancelled" || !c.amount_usd ? "—" : fmt(netVnd)}
+                {c.status === "cancelled" || !c.amount_usd ? (
+                  "—"
+                ) : (
+                  <>
+                    {fmt(netVnd)}
+                    <div className="text-[10px] text-faint">
+                      {locked ? `@ ${new Intl.NumberFormat("en-US").format(c.fx_rate ?? 0)}` : "ước tính"}
+                    </div>
+                  </>
+                )}
               </div>
               <div>
                 <Badge bg={sm.bg} fg={sm.fg}>
