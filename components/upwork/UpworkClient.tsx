@@ -6,7 +6,7 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
-import { createContract, activateContract, billContract, receiveContract } from "@/lib/actions/upwork";
+import { createContract, activateContract, billContract, receiveContract, cancelContract } from "@/lib/actions/upwork";
 import type { UpworkContract } from "@/lib/queries/upwork";
 import type { Ref } from "@/lib/queries";
 
@@ -156,7 +156,8 @@ export function UpworkClient({
                 {c.status === "draft" && (
                   <button
                     onClick={() => doAction(() => activateContract(c.id))}
-                    className="border border-card-border text-ink-soft rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:border-primary hover:text-primary whitespace-nowrap"
+                    disabled={busy}
+                    className="border border-card-border text-ink-soft rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:border-primary hover:text-primary whitespace-nowrap disabled:opacity-50"
                   >
                     Activate
                   </button>
@@ -164,7 +165,8 @@ export function UpworkClient({
                 {(c.status === "draft" || c.status === "active") && (
                   <button
                     onClick={() => doAction(() => billContract(c.id, monthKey))}
-                    className="bg-primary text-white border-0 rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
+                    disabled={busy}
+                    className="bg-primary text-white border-0 rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap disabled:opacity-50"
                   >
                     Bill
                   </button>
@@ -175,9 +177,23 @@ export function UpworkClient({
                       setReceiveId(c.id);
                       setReceiveAccount("");
                     }}
-                    className="bg-primary text-white border-0 rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
+                    disabled={busy}
+                    className="bg-primary text-white border-0 rounded-full px-[12px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap disabled:opacity-50"
                   >
                     Mark received
+                  </button>
+                )}
+                {(c.status === "draft" || c.status === "active" || c.status === "billed") && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Huỷ hợp đồng "${c.client}"?`)) doAction(() => cancelContract(c.id));
+                    }}
+                    disabled={busy}
+                    aria-label="Huỷ hợp đồng"
+                    title="Huỷ hợp đồng"
+                    className="bg-chip text-[#B4573B] border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#F7E3DC] disabled:opacity-50"
+                  >
+                    <i className="ph-duotone ph-x-circle" aria-hidden />
                   </button>
                 )}
                 {(c.status === "received" || c.status === "cancelled") && (

@@ -36,6 +36,19 @@ export async function setGoldPrice(price: number) {
   return { ok: true };
 }
 
+export async function setHouseGoal(goal: { down_payment: number; target_year: number }) {
+  const sb = await createClient();
+  const down = Math.max(0, Math.round(goal.down_payment || 0));
+  const year = Math.round(goal.target_year || 0);
+  const { error } = await sb.rpc("set_setting", {
+    p_key: "house_goal",
+    p_value: { down_payment: down, target_year: year },
+  });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
 export async function setAllocationTargets(targets: { cash: number; gold: number; stock: number }) {
   const sb = await createClient();
   const { error } = await sb.rpc("set_setting", {

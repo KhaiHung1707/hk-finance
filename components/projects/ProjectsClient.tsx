@@ -12,6 +12,7 @@ import {
   createMilestone,
   billMilestone,
   collectMilestone,
+  cancelMilestone,
 } from "@/lib/actions/projects";
 import type { ProjectFinance, Milestone } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
@@ -148,7 +149,9 @@ export function ProjectsClient({
       {projects.map((p) => {
         const sm = projStatusStyle[p.status] ?? projStatusStyle.active;
         const pctColl =
-          p.contract_value_vnd > 0 ? Math.round((p.collected_vnd / p.contract_value_vnd) * 100) : 0;
+          p.contract_value_vnd > 0
+            ? Math.min(100, Math.round((p.collected_vnd / p.contract_value_vnd) * 100))
+            : 0;
         return (
           <div key={p.id} className="bg-card border border-card-border rounded-[18px] p-[22px]">
             <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -197,6 +200,14 @@ export function ProjectsClient({
               <div className="h-2 rounded-full bg-[#EFEAE0] overflow-hidden">
                 <div className="h-full bg-primary rounded-full" style={{ width: `${pctColl}%` }} />
               </div>
+              <div className="flex justify-between text-[11px] mt-[6px]">
+                <span className="text-muted">
+                  Đã thu <b className="text-[#1F7A5C] tnum" title={full(p.collected_vnd)}>{fmt(p.collected_vnd)}</b>
+                </span>
+                <span className="text-muted">
+                  Còn lại <b className="text-ink tnum" title={full(p.outstanding_vnd)}>{fmt(p.outstanding_vnd)}</b>
+                </span>
+              </div>
             </div>
 
             {/* Milestones */}
@@ -224,7 +235,8 @@ export function ProjectsClient({
                     {m.status === "draft" && (
                       <button
                         onClick={() => doAction(() => billMilestone(m.id, monthKey))}
-                        className="ml-[6px] bg-primary-dark text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-[#0A211C] whitespace-nowrap"
+                        disabled={busy}
+                        className="ml-[6px] bg-primary-dark text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-[#0A211C] whitespace-nowrap disabled:opacity-50"
                       >
                         Bill
                       </button>
@@ -235,9 +247,34 @@ export function ProjectsClient({
                           setCollect({ id: m.id, label: `${p.name} · ${m.name}`, amountVnd: vnd });
                           setCollectAccount("");
                         }}
-                        className="ml-[6px] bg-primary text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
+                        disabled={busy}
+                        className="ml-[6px] bg-primary text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap disabled:opacity-50"
                       >
                         Collect
+                      </button>
+                    )}
+                    {(m.status === "received" || m.status === "cancelled") && (
+                      <span
+                        className="ml-[6px] text-[10px] font-bold rounded-full px-[9px] py-[3px] whitespace-nowrap"
+                        style={{
+                          background: m.status === "received" ? "#DFF2E7" : "#F1EDE6",
+                          color: m.status === "received" ? "#1F7A5C" : "#8A8577",
+                        }}
+                      >
+                        {m.status === "received" ? "Đã thu" : "Đã huỷ"}
+                      </span>
+                    )}
+                    {(m.status === "draft" || m.status === "billed") && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`Huỷ milestone "${m.name}"?`)) doAction(() => cancelMilestone(m.id));
+                        }}
+                        disabled={busy}
+                        aria-label="Huỷ milestone"
+                        title="Huỷ milestone"
+                        className="ml-[2px] bg-transparent text-muted border-0 rounded-full w-[26px] h-[26px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#F7E3DC] hover:text-[#B4573B] disabled:opacity-50"
+                      >
+                        <i className="ph-duotone ph-x-circle" aria-hidden />
                       </button>
                     )}
                   </div>

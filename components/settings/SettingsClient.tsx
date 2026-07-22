@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { fmt, full, pct } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
-import { setFxRate, setUpworkFee, setGoldPrice, setAllocationTargets } from "@/lib/actions/settings";
+import { setFxRate, setUpworkFee, setGoldPrice, setAllocationTargets, setHouseGoal } from "@/lib/actions/settings";
 import type { SettingsBundle } from "@/lib/queries/settings";
 
 /** Ô số có thể sửa tại chỗ: hiển thị giá trị, bấm sửa → input + Lưu. */
@@ -207,19 +207,24 @@ export function SettingsClient({ data }: { data: SettingsBundle }) {
         </div>
       </div>
 
-      {/* House goal (read-only tóm tắt) */}
+      {/* House goal — sửa được */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
         <div className="text-[15px] font-bold mb-4">House goal</div>
         <div className="flex flex-col gap-3 text-[13px]">
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <span className="text-ink-soft">Down payment</span>
-            <span className="font-bold tnum" title={full(data.houseGoal.down_payment)}>
-              {fmt(data.houseGoal.down_payment)}
-            </span>
+            <EditableValue
+              value={data.houseGoal.down_payment}
+              format={fmt}
+              onSave={(v) => setHouseGoal({ down_payment: v, target_year: data.houseGoal.target_year })}
+            />
           </div>
-          <div className="flex justify-between border-t border-divider pt-3">
+          <div className="flex justify-between items-center border-t border-divider pt-3">
             <span className="text-ink-soft">Target year</span>
-            <span className="font-bold tnum">{data.houseGoal.target_year || "—"}</span>
+            <EditableValue
+              value={data.houseGoal.target_year}
+              onSave={(v) => setHouseGoal({ down_payment: data.houseGoal.down_payment, target_year: v })}
+            />
           </div>
           <div className="flex justify-between border-t border-divider pt-3">
             <span className="text-ink-soft">Deposit default rate</span>

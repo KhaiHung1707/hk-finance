@@ -2,9 +2,10 @@ import { AppShell } from "@/components/ui/AppShell";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { Badge } from "@/components/ui/Badge";
 import { BuyGoldButton } from "@/components/assets/BuyGoldButton";
+import { GoldLotsCard } from "@/components/assets/GoldLotsCard";
 import { fmt, full, pct, chi } from "@/lib/format";
 import { getAllocation, getNetWorth, getAccountsRef, getBaselineMonthKey, getProfile } from "@/lib/queries";
-import { getGoldSummary, getGoldPrice } from "@/lib/queries/assets";
+import { getGoldSummary, getGoldLots, getGoldPrice } from "@/lib/queries/assets";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,11 @@ const GRP_META: Record<string, { label: string; color: string }> = {
 
 export default async function AssetsPage() {
   const monthKey = await getBaselineMonthKey();
-  const [allocation, netWorth, gold, goldPrice, accounts, profile] = await Promise.all([
+  const [allocation, netWorth, gold, goldLots, goldPrice, accounts, profile] = await Promise.all([
     getAllocation(),
     getNetWorth(),
     getGoldSummary(),
+    getGoldLots(),
     getGoldPrice(),
     getAccountsRef(),
     getProfile(),
@@ -180,6 +182,9 @@ export default async function AssetsPage() {
           </div>
         </div>
       </div>
+
+      {/* Danh sách từng lô vàng + bán */}
+      <GoldLotsCard lots={goldLots} accounts={accounts} monthKey={monthKey} />
     </AppShell>
   );
 }
