@@ -3,7 +3,7 @@ import { AppShell } from "@/components/ui/AppShell";
 import { StatCard } from "@/components/ui/StatCard";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { Badge } from "@/components/ui/Badge";
-import { LineChart } from "@/components/ui/LineChart";
+import { NetWorthChart } from "@/components/forecast/NetWorthChart";
 import { ReceivablesCard } from "@/components/dashboard/ReceivablesCard";
 import { CloseMonthButton } from "@/components/dashboard/CloseMonthButton";
 import { accountIcon } from "@/lib/design/tokens";
@@ -18,7 +18,7 @@ import {
   getProfile,
   getAccountsRef,
 } from "@/lib/queries";
-import { getForecastParams, getForecastStart } from "@/lib/queries/forecast";
+import { getForecastParams, getForecastStart, getForecastSnapshots } from "@/lib/queries/forecast";
 import { getHouseGoal } from "@/lib/queries/settings";
 import { runForecast } from "@/lib/forecast";
 
@@ -32,7 +32,7 @@ const ALLOC_META: Record<string, { label: string; color: string }> = {
 
 export default async function DashboardPage() {
   const monthKey = await getBaselineMonthKey();
-  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, houseGoal] =
+  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, snapshots, houseGoal] =
     await Promise.all([
       getAccountBalances(),
       getMonthlySummary(monthKey),
@@ -43,6 +43,7 @@ export default async function DashboardPage() {
       getAccountsRef(),
       getForecastParams(),
       getForecastStart(),
+      getForecastSnapshots(),
       getHouseGoal(),
     ]);
 
@@ -253,12 +254,16 @@ export default async function DashboardPage() {
             </span>
             <span className="text-[12px] text-muted">in 12 months · +{fc.totalGrowthPct.toFixed(1)}%</span>
           </div>
-          <LineChart
-            labels={fc.monthKeys}
-            series={[{ key: "nw", label: "Net worth", color: "#17554A", values: fc.nwSeries }]}
-            height={130}
-            allowBar={false}
-            ariaLabel="Dự phóng tài sản ròng 12 tháng"
+          <NetWorthChart
+            nwSeries={fc.nwSeries}
+            monthKeys={fc.monthKeys}
+            horizon={12}
+            goalTarget={fc.goalTarget}
+            goalReachedAt={fc.goalReachedAt}
+            receivablesFirstMonth={fcStart.receivablesFirstMonth}
+            receivablesLandFirstMonth={fcParams.receivablesLandFirstMonth}
+            snapshots={snapshots}
+            height={180}
           />
           {houseGoal.down_payment > 0 && (
             <div className="mt-auto border-t border-divider pt-4">

@@ -1,9 +1,10 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { fmt, full } from "@/lib/format";
 import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { LineChart, type ChartSeries } from "@/components/ui/LineChart";
+import { NetWorthChart } from "@/components/forecast/NetWorthChart";
 import { runForecast } from "@/lib/forecast";
 import { setForecastPlanValue } from "@/lib/actions/settings";
 import type { ForecastParams, ForecastStart, ForecastSnapshot } from "@/lib/queries/forecast";
@@ -11,13 +12,6 @@ import type { ForecastParams, ForecastStart, ForecastSnapshot } from "@/lib/quer
 function srcColor(name: string, idx: number): string {
   return sourceColor[name] ?? chartPalette[idx % chartPalette.length];
 }
-
-const GROUP_ICON: Record<string, string> = {
-  cash: "ph-duotone ph-wallet",
-  gold: "ph-duotone ph-coins",
-  stock: "ph-duotone ph-chart-line-up",
-  deposits: "ph-duotone ph-vault",
-};
 
 /** Viết tắt chủ đích cho header cột hẹp (kèm tooltip = tên đầy đủ). */
 const SOURCE_ABBR: Record<string, string> = {
@@ -32,20 +26,6 @@ function srcAbbr(name: string): string {
   return SOURCE_ABBR[name] ?? (name.length > 7 ? name.slice(0, 6) + "." : name);
 }
 
-/** SVG mini-line cho từng nhóm tài sản. */
-function Spark({ series, color }: { series: number[]; color: string }) {
-  const min = Math.min(...series);
-  const max = Math.max(...series);
-  const span = max - min || 1;
-  const pts = series
-    .map((v, i) => `${((i / (series.length - 1)) * 78 + 1).toFixed(1)},${(32 - ((v - min) / span) * 30).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg viewBox="0 0 80 34" className="w-full h-[34px]">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </svg>
-  );
-}
 
 export function ForecastClient({
   params,
@@ -66,8 +46,6 @@ export function ForecastClient({
   const [planOverride, setPlanOverride] = useState<Record<string, number>>({});
   const [expenseOverride, setExpenseOverride] = useState<number | null>(null);
   const [showActual, setShowActual] = useState(true);
-  const [nwHover, setNwHover] = useState<number | null>(null); // index tháng hover trên chart net-worth
-  const nwWrapRef = useRef<HTMLDivElement | null>(null);
 
   // params hiệu lực = params gốc + override (chưa cần đợi network).
   const effectiveParams: ForecastParams = useMemo(() => {
@@ -85,23 +63,9 @@ export function ForecastClient({
     [effectiveParams, start, scenario, horizon]
   );
 
-  // ---- chart geometry (viewBox 620×200) ----
-  const W = 620;
-  const H = 200;
-  // trục Y bao trùm cả đường headline, mục tiêu nhà, và snapshot (nếu vẽ).
+  // có snapshot trong dải hiện tại → cho phép bật/tắt overlay "số thực tế".
   const snapInRange = snapshots.filter((s) => r.monthKeys.includes(s.month_key));
-  const yVals = [
-    ...r.nwSeries,
-    ...(r.goalTarget > 0 ? [r.goalTarget] : []),
-    ...(showActual ? snapInRange.map((s) => s.total) : []),
-  ];
-  const min = Math.min(...yVals);
-  const max = Math.max(...yVals) || min + 1;
-  const X = (i: number) => 46 + (i / horizon) * (W - 54);
-  const Y = (v: number) => H - 10 - ((v - min) / (max - min || 1)) * (H - 26);
-  const line = r.nwSeries.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
-  const area = `46,${H - 10} ${line} ${W},${H - 10}`;
-  const tickIdx = [...new Set([0, Math.round(horizon / 3), Math.round((2 * horizon) / 3), horizon])];
+
   // Revenue by source → multi-line: mỗi nguồn 1 đường, values theo tháng.
   const revenueLabels = r.months.map((m) => m.monthKey);
   const revenueSeries: ChartSeries[] = r.sources.map((s, i) => ({
@@ -111,21 +75,10 @@ export function ForecastClient({
     values: r.months.map((m) => m.bySource[s.source] ?? 0),
   }));
 
-  // receivables landing tháng 1 (index 1 trong series)
-  const showReceivables = params.receivablesLandFirstMonth && start.receivablesFirstMonth > 0 && horizon >= 1;
-
-  // snapshot points + deviation (|actual − base| / base > 10%)
-  const snapPoints = showActual
-    ? snapInRange.map((s) => {
-        const idx = r.monthKeys.indexOf(s.month_key);
-        const base = r.nwSeries[idx];
-        const deviation = base > 0 ? Math.abs(s.total - base) / base : 0;
-        return { idx, total: s.total, deviates: deviation > 0.1, monthKey: s.month_key };
-      })
-    : [];
-
-  // goal reached marker index
-  const goalIdx = r.goalReachedAt ? r.monthKeys.indexOf(r.goalReachedAt) : -1;
+  // Asset-class growth → multi-line (giống Revenue by source).
+  const groupSeries: ChartSeries[] = r.groups
+    .filter((g) => !(g.series[0] <= 0 && g.series[g.series.length - 1] <= 0))
+    .map((g) => ({ key: g.key, label: g.label, color: groupColor[g.key], values: g.series }));
 
   const scenarioLabel = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);
   const pill = (active: boolean) =>
@@ -233,149 +186,17 @@ export function ForecastClient({
             )}
           </div>
         </div>
-        <div
-          ref={nwWrapRef}
-          className="relative"
-          onPointerMove={(e) => {
-            const el = nwWrapRef.current;
-            if (!el) return;
-            const rect = el.getBoundingClientRect();
-            const frac = (e.clientX - rect.left) / rect.width; // 0..1 theo bề rộng
-            // map sang toạ độ viewBox rồi tìm i gần nhất (X(i) = 46 + i/horizon*(W-54))
-            const vx = frac * W;
-            let best = 0;
-            let bestD = Infinity;
-            for (let i = 0; i <= horizon; i++) {
-              const d = Math.abs(X(i) - vx);
-              if (d < bestD) {
-                bestD = d;
-                best = i;
-              }
-            }
-            setNwHover(best);
-          }}
-          onPointerLeave={() => setNwHover(null)}
-        >
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height: 260 }}>
-          <defs>
-            <filter id="nwglow" x="-4%" y="-20%" width="108%" height="140%">
-              <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#17554A" floodOpacity="0.25" />
-            </filter>
-          </defs>
-          {[0, 1 / 3, 2 / 3, 1].map((t, i) => {
-            const v = min + (max - min) * t;
-            return (
-              <g key={i}>
-                <line x1={46} y1={Y(v)} x2={W} y2={Y(v)} stroke="#EFEAE0" strokeWidth={1} strokeDasharray={i === 0 ? "0" : "3 4"} />
-                <text x={2} y={Y(v) + 3} fontSize={9} fill="#9AA49E" fontWeight={600}>
-                  {fmt(v)}
-                </text>
-              </g>
-            );
-          })}
-          <polygon points={area} fill="#EAF4EE" />
-
-          {/* Đường mục tiêu nhà */}
-          {r.goalTarget > 0 && r.goalTarget >= min && r.goalTarget <= max && (
-            <>
-              <line x1={46} y1={Y(r.goalTarget)} x2={W} y2={Y(r.goalTarget)} stroke="#A5731F" strokeWidth={1.5} strokeDasharray="5 4" />
-              <text x={W - 2} y={Y(r.goalTarget) - 4} fontSize={9} fill="#A5731F" fontWeight={700} textAnchor="end">
-                Mục tiêu
-              </text>
-            </>
-          )}
-
-          <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" filter="url(#nwglow)" />
-
-          {/* Receivables marker tháng 1 */}
-          {showReceivables && (
-            <g>
-              <circle cx={X(1)} cy={Y(r.nwSeries[1])} r={4.5} fill="#E8C97A" stroke="#FFFFFF" strokeWidth={2} />
-              <text x={X(1)} y={Y(r.nwSeries[1]) - 8} fontSize={8.5} fill="#A5731F" fontWeight={700} textAnchor="middle">
-                +{fmt(start.receivablesFirstMonth)} thu về
-              </text>
-            </g>
-          )}
-
-          {/* Snapshot overlay (actual) */}
-          {snapPoints.map((p) => (
-            <g key={`snap${p.idx}`}>
-              <circle
-                cx={X(p.idx)}
-                cy={Y(p.total)}
-                r={p.deviates ? 5 : 3.5}
-                fill={p.deviates ? "#B4573B" : "#8FBCA7"}
-                stroke="#FFFFFF"
-                strokeWidth={2}
-              >
-                <title>
-                  {`${p.monthKey} · thực tế ${full(p.total)}${p.deviates ? " (lệch >10% so với dự phóng)" : ""}`}
-                </title>
-              </circle>
-            </g>
-          ))}
-
-          {/* Goal reached marker */}
-          {goalIdx >= 0 && goalIdx <= horizon && (
-            <circle cx={X(goalIdx)} cy={Y(r.nwSeries[goalIdx])} r={4} fill="#1F7A5C" stroke="#FFFFFF" strokeWidth={2}>
-              <title>{`Đạt mục tiêu tại ${r.goalReachedAt}`}</title>
-            </circle>
-          )}
-
-          {tickIdx.map((i) => (
-            <circle key={i} cx={X(i)} cy={Y(r.nwSeries[i])} r={3} fill="#17554A" stroke="#FFFFFF" strokeWidth={2} />
-          ))}
-          {tickIdx.map((i) => (
-            <text key={`x${i}`} x={X(i)} y={H - 1} fontSize={9} fill="#9AA49E" fontWeight={600} textAnchor="middle">
-              {i === 0 ? "now" : r.monthKeys[i]}
-            </text>
-          ))}
-
-          {/* crosshair khi hover */}
-          {nwHover != null && (
-            <line
-              x1={X(nwHover)}
-              y1={10}
-              x2={X(nwHover)}
-              y2={H - 10}
-              stroke="#B9C2BC"
-              strokeWidth={1}
-              strokeDasharray="4 4"
-              vectorEffect="non-scaling-stroke"
-            />
-          )}
-        </svg>
-
-        {/* dot + tooltip HTML (sắc nét, không méo theo SVG stretch) */}
-        {nwHover != null && (
-          <>
-            <span
-              className="absolute w-[10px] h-[10px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none bg-primary"
-              style={{ left: `${(X(nwHover) / W) * 100}%`, top: `${(Y(r.nwSeries[nwHover]) / H) * 260}px` }}
-            />
-            <div
-              className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3"
-              style={{
-                left: (X(nwHover) / W) * 100 > 58 ? undefined : `calc(${(X(nwHover) / W) * 100}% + 12px)`,
-                right: (X(nwHover) / W) * 100 > 58 ? `calc(${100 - (X(nwHover) / W) * 100}% + 12px)` : undefined,
-                minWidth: 150,
-                boxShadow: "0 12px 32px rgba(14,44,38,0.16)",
-              }}
-            >
-              <div className="text-[12px] font-bold text-muted mb-1">
-                {nwHover === 0 ? "now" : r.monthKeys[nwHover]}
-              </div>
-              <div className="flex items-center gap-2 text-[12px]">
-                <span className="w-[12px] h-[3px] rounded-full bg-primary flex-shrink-0" />
-                <span className="text-ink-soft">Net worth</span>
-                <span className="ml-auto font-extrabold text-ink tnum" title={full(r.nwSeries[nwHover])}>
-                  {fmt(r.nwSeries[nwHover])}
-                </span>
-              </div>
-            </div>
-          </>
-        )}
-        </div>
+        <NetWorthChart
+          nwSeries={r.nwSeries}
+          monthKeys={r.monthKeys}
+          horizon={horizon}
+          goalTarget={r.goalTarget}
+          goalReachedAt={r.goalReachedAt}
+          receivablesFirstMonth={start.receivablesFirstMonth}
+          receivablesLandFirstMonth={params.receivablesLandFirstMonth}
+          snapshots={snapshots}
+          showActual={showActual}
+        />
         {r.goalTarget > 0 && (
           <div
             className="mt-3 rounded-[12px] px-4 py-3 flex items-center gap-3 flex-wrap"
@@ -443,64 +264,24 @@ export function ForecastClient({
         </div>
       </div>
 
-      {/* Cột phải — Asset-class growth */}
+      {/* Cột phải — Asset-class growth (multi-line, giống Revenue by source) */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px] flex flex-col">
         <div className="flex items-center gap-2 mb-3">
           <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
             <i className="ph-duotone ph-chart-donut" aria-hidden />
           </div>
-          <div className="text-[15px] font-bold">Asset-class growth</div>
+          <div className="text-[15px] font-bold">Asset-class growth · {horizon}M</div>
         </div>
-        <div className="flex flex-col gap-[10px]">
-          {r.groups.map((g) => {
-            const start = g.series[0];
-            const end = g.series[g.series.length - 1];
-            const empty = start <= 0 && end <= 0;
-            const up = end >= start;
-            return (
-              <div
-                key={g.key}
-                className="bg-fill-soft rounded-[12px] p-3 flex items-center gap-3"
-                title={
-                  empty
-                    ? `${g.label}: chưa có`
-                    : `${g.label}: ${full(start)} → ${full(end)} (${up ? "+" : "−"}${Math.abs(g.growthPct).toFixed(1)}%)`
-                }
-              >
-                <div
-                  className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[16px] flex-shrink-0"
-                  style={{ background: `${groupColor[g.key]}22`, color: groupColor[g.key] }}
-                >
-                  <i className={GROUP_ICON[g.key]} aria-hidden />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[13px] font-bold">{g.label}</span>
-                    <span className="text-[14px] font-extrabold tnum" title={full(end)}>
-                      {empty ? "—" : fmt(end)}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-faint tnum">
-                    {empty ? "chưa có" : `${fmt(start)} → ${horizon}M`}
-                  </div>
-                </div>
-                {!empty && (
-                  <div className="w-[64px] flex-shrink-0">
-                    <Spark series={g.series} color={groupColor[g.key]} />
-                  </div>
-                )}
-                {!empty && (
-                  <span
-                    className="text-[11px] font-extrabold rounded-full px-2 py-[3px] flex-shrink-0"
-                    style={{ background: up ? "#DFF2E7" : "#F7E3DC", color: up ? "#1F7A5C" : "#B4573B" }}
-                  >
-                    {start > 0 ? `${up ? "▲" : "▼"} ${Math.abs(g.growthPct).toFixed(1)}%` : "new"}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        {groupSeries.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-[13px] text-faint">Chưa có tài sản.</div>
+        ) : (
+          <LineChart
+            labels={r.monthKeys}
+            series={groupSeries}
+            height={260}
+            ariaLabel="Tăng trưởng từng nhóm tài sản qua từng tháng"
+          />
+        )}
       </div>
       </div>
 
