@@ -250,3 +250,10 @@ create table if not exists app_profile (
   initials text,
   role     text default 'Personal'
 );
+
+-- ---------- Migrations cho DB đã tồn tại -------------------------------------
+-- `create table if not exists` KHÔNG thêm cột mới vào bảng đã có. Với DB đang chạy,
+-- thêm cột qua ALTER ... IF NOT EXISTS (idempotent, không mất dữ liệu).
+alter table milestones        add column if not exists received_on date;
+alter table upwork_contracts  add column if not exists billed_on   date;
+alter table upwork_contracts  add column if not exists received_on date;
