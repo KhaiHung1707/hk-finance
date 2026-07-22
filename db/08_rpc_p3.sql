@@ -449,6 +449,50 @@ begin
 end $$;
 
 -- =============================================================================
+-- DELETE RPC (xoá hẳn bản ghi + tx liên quan). Xoá tx đã ảnh hưởng số dư sẽ hoàn
+-- nguyên số dư (số dư = tổng tx). Xoá bản ghi module TRƯỚC rồi tx (FK không cascade).
+-- =============================================================================
+
+-- delete_deposit: CHỈ khi 'active'. Xoá sổ + tx mở sổ (nếu có) → hoàn số dư.
+create or replace function delete_deposit(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text; v_open_tx uuid;
+begin
+  select status into v_status from term_deposits where id = p_id for update;
+  if not found then raise exception 'delete_deposit: sổ không tồn tại'; end if;
+  if v_status <> 'active' then raise exception 'delete_deposit: chỉ xoá được sổ active'; end if;
+
+  -- tx mở sổ (expense ref = sổ này) — có thể null nếu pre-app.
+  select id into v_open_tx from transactions
+    where ref_table = 'term_deposits' and ref_id = p_id and type = 'expense' limit 1;
+
+  delete from term_deposits where id = p_id;
+  if v_open_tx is not null then delete from transactions where id = v_open_tx; end if;
+end $$;
+
+-- delete_stock_trade: xoá 1 lệnh + tx của nó → position tự tính lại, hoàn số dư.
+create or replace function delete_stock_trade(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_tx uuid;
+begin
+  select tx_id into v_tx from stock_trades where id = p_id for update;
+  if not found then raise exception 'delete_stock_trade: trade không tồn tại'; end if;
+  delete from stock_trades where id = p_id;
+  if v_tx is not null then delete from transactions where id = v_tx; end if;
+end $$;
+
+-- delete_dividend: xoá bản ghi cổ tức + tx thu → hoàn số dư.
+create or replace function delete_dividend(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_tx uuid;
+begin
+  select tx_id into v_tx from dividends where id = p_id for update;
+  if not found then raise exception 'delete_dividend: cổ tức không tồn tại'; end if;
+  delete from dividends where id = p_id;
+  if v_tx is not null then delete from transactions where id = v_tx; end if;
+end $$;
+
+-- =============================================================================
 -- FUNCTION PRIVILEGES (chạy CUỐI CÙNG — sau khi mọi RPC P1/P2/P3 đã tạo).
 -- Mọi RPC là security definer; Postgres/Supabase mặc định GRANT execute cho
 -- `public`. Nếu không revoke, `anon` (chưa đăng nhập) gọi thẳng RPC ghi tiền,

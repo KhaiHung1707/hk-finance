@@ -96,6 +96,30 @@ export async function updateDeposit(input: {
   });
 }
 
+export async function deleteDeposit(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_deposit", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
+export async function deleteStockTrade(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_stock_trade", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
+export async function deleteDividend(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_dividend", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
 export async function updateStockTrade(input: { id: string; qty: number; price: number }) {
   return guard(async () => {
     const qty = positive(input.qty, "Số lượng");

@@ -10,11 +10,14 @@ import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import {
   openDeposit,
   updateDeposit,
+  deleteDeposit,
   settleDeposit,
   buyStock,
   sellStock,
   recordDividend,
   updateStockTrade,
+  deleteStockTrade,
+  deleteDividend,
 } from "@/lib/actions/investments";
 import { updatePrice } from "@/lib/actions/assets";
 import type { DepositPosition, StockPosition, StockHistoryRow } from "@/lib/queries/investments";
@@ -107,6 +110,13 @@ export function InvestmentsClient({
     router.refresh();
   }
 
+  async function del(confirmMsg: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
+    if (!confirm(confirmMsg)) return;
+    const res = await fn();
+    if (!res.ok) return alert(res.error ?? "Lỗi xoá");
+    router.refresh();
+  }
+
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "?";
   const tabBtn = (active: boolean) =>
     `border-0 rounded-full px-5 py-[10px] text-[13px] font-bold cursor-pointer ${
@@ -189,6 +199,7 @@ export function InvestmentsClient({
                   d={d}
                   onSettle={() => open({ kind: "settle", dep: d })}
                   onEdit={() => open({ kind: "editDeposit", dep: d })}
+                  onDelete={() => del(`Xoá sổ "${d.name}"? Giao dịch mở sổ (nếu có) sẽ bị xoá, hoàn số dư.`, () => deleteDeposit(d.id))}
                 />
               ))}
 
@@ -368,6 +379,18 @@ export function InvestmentsClient({
                                       <i className="ph-duotone ph-pencil-simple" aria-hidden />
                                     </button>
                                   )}
+                                  <button
+                                    onClick={() =>
+                                      h.kind === "dividend"
+                                        ? del(`Xoá cổ tức ${h.ticker}? Giao dịch thu sẽ bị xoá.`, () => deleteDividend(h.id))
+                                        : del(`Xoá lệnh ${h.kind === "buy" ? "mua" : "bán"} ${h.ticker}? Giao dịch sẽ bị xoá, hoàn số dư.`, () => deleteStockTrade(h.id))
+                                    }
+                                    aria-label="Xoá giao dịch"
+                                    title="Xoá"
+                                    className="text-muted hover:text-[#B4573B] text-[13px]"
+                                  >
+                                    <i className="ph-duotone ph-trash" aria-hidden />
+                                  </button>
                                 </div>
                               ))}
                             </div>
@@ -750,11 +773,13 @@ function DepositRow({
   d,
   onSettle,
   onEdit,
+  onDelete,
   settledView,
 }: {
   d: DepositPosition;
   onSettle?: () => void;
   onEdit?: () => void;
+  onDelete?: () => void;
   settledView?: boolean;
 }) {
   const st =
@@ -810,6 +835,14 @@ function DepositRow({
               className="text-muted hover:text-primary text-[14px] w-[28px] h-[28px] flex items-center justify-center"
             >
               <i className="ph-duotone ph-pencil-simple" aria-hidden />
+            </button>
+            <button
+              onClick={onDelete}
+              aria-label="Xoá sổ"
+              title="Xoá"
+              className="text-muted hover:text-[#B4573B] text-[14px] w-[28px] h-[28px] flex items-center justify-center"
+            >
+              <i className="ph-duotone ph-trash" aria-hidden />
             </button>
             <button
               onClick={onSettle}
