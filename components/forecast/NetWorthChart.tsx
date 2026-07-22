@@ -18,7 +18,8 @@ export function NetWorthChart({
   receivablesLandFirstMonth = false,
   snapshots = [],
   showActual = true,
-  height = 260,
+  // Cao co giãn theo bề rộng (không cố định px). Có thể truyền px hoặc bất kỳ CSS length.
+  height = "clamp(200px, 30vw, 300px)",
 }: {
   nwSeries: number[];
   monthKeys: string[];
@@ -29,7 +30,7 @@ export function NetWorthChart({
   receivablesLandFirstMonth?: boolean;
   snapshots?: ForecastSnapshot[];
   showActual?: boolean;
-  height?: number;
+  height?: number | string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -169,7 +170,7 @@ export function NetWorthChart({
         <>
           <span
             className="absolute w-[10px] h-[10px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none bg-primary"
-            style={{ left: `${hoverLeftPct}%`, top: `${(Y(nwSeries[hover]) / H) * height}px` }}
+            style={{ left: `${hoverLeftPct}%`, top: `${(Y(nwSeries[hover]) / H) * 100}%` }}
           />
           <div
             className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3"

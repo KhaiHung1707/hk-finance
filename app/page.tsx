@@ -264,7 +264,7 @@ export default async function DashboardPage() {
             receivablesFirstMonth={fcStart.receivablesFirstMonth}
             receivablesLandFirstMonth={fcParams.receivablesLandFirstMonth}
             snapshots={snapshots}
-            height={180}
+            height="clamp(150px, 22vw, 220px)"
           />
           {houseGoal.down_payment > 0 && (
             <div className="mt-auto border-t border-divider pt-4">

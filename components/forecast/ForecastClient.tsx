@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { fmt, full } from "@/lib/format";
 import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { Modal } from "@/components/ui/Modal";
 import { LineChart, type ChartSeries } from "@/components/ui/LineChart";
 import { NetWorthChart } from "@/components/forecast/NetWorthChart";
 import { runForecast } from "@/lib/forecast";
@@ -46,6 +47,7 @@ export function ForecastClient({
   const [planOverride, setPlanOverride] = useState<Record<string, number>>({});
   const [expenseOverride, setExpenseOverride] = useState<number | null>(null);
   const [showActual, setShowActual] = useState(true);
+  const [showAssumptions, setShowAssumptions] = useState(false);
 
   // params hiệu lực = params gốc + override (chưa cần đợi network).
   const effectiveParams: ForecastParams = useMemo(() => {
@@ -79,6 +81,12 @@ export function ForecastClient({
   const groupSeries: ChartSeries[] = r.groups
     .filter((g) => !(g.series[0] <= 0 && g.series[g.series.length - 1] <= 0))
     .map((g) => ({ key: g.key, label: g.label, color: groupColor[g.key], values: g.series }));
+
+  // số field kế hoạch còn là "ước lượng" (chưa xác nhận) → badge trên nút mở form.
+  const assumptionCount =
+    Object.keys(params.planIncomeMonthly).filter(
+      (src) => params.assumptions.planIncome[src] && planOverride[src] === undefined
+    ).length + (params.assumptions.planExpense && expenseOverride === null ? 1 : 0);
 
   const scenarioLabel = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);
   const pill = (active: boolean) =>
@@ -237,13 +245,37 @@ export function ForecastClient({
         )}
       </div>
 
-      {/* Chỉnh giả định tại chỗ */}
-      <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
-        <div className="text-[15px] font-bold mb-1">Giả định kế hoạch (chỉnh tại chỗ)</div>
-        <div className="text-[12px] text-muted mb-4">
-          Sửa → biểu đồ tính lại ngay; lưu vào Settings khi rời ô. Chip “ước lượng” mất khi bạn xác nhận số.
+      {/* Giả định kế hoạch — nút mở form (không show hết ra ngoài) */}
+      <button
+        onClick={() => setShowAssumptions(true)}
+        className="bg-card border border-card-border rounded-[18px] px-[22px] py-4 flex items-center gap-3 cursor-pointer hover:border-primary transition-colors text-left w-full"
+      >
+        <div className="w-[34px] h-[34px] rounded-[10px] bg-chip text-primary flex items-center justify-center text-[17px] flex-shrink-0">
+          <i className="ph-duotone ph-sliders-horizontal" aria-hidden />
         </div>
-        <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-bold">Giả định kế hoạch</div>
+          <div className="text-[12px] text-muted">Chỉnh thu/chi dự phóng — biểu đồ tính lại ngay.</div>
+        </div>
+        {assumptionCount > 0 && (
+          <span className="text-[11px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-[10px] py-[3px] whitespace-nowrap">
+            {assumptionCount} ước lượng
+          </span>
+        )}
+        <i className="ph-duotone ph-caret-right text-muted text-[16px]" aria-hidden />
+      </button>
+
+      <Modal
+        open={showAssumptions}
+        onClose={() => setShowAssumptions(false)}
+        title="Giả định kế hoạch"
+        icon="ph-duotone ph-sliders-horizontal"
+        width={420}
+      >
+        <div className="text-[12px] text-muted mb-3">
+          Sửa → biểu đồ tính lại ngay; lưu vào Settings khi rời ô. Chip “ước lượng” mất khi xác nhận số.
+        </div>
+        <div className="flex flex-col gap-[10px] max-h-[60vh] overflow-y-auto pr-1">
           {Object.keys(params.planIncomeMonthly).map((src) => (
             <AssumptionInput
               key={src}
@@ -262,7 +294,7 @@ export function ForecastClient({
             onCommit={(v) => setForecastPlanValue("__expense__", v)}
           />
         </div>
-      </div>
+      </Modal>
 
       {/* Cột phải — Asset-class growth (multi-line, giống Revenue by source) */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px] flex flex-col">
