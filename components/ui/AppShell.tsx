@@ -59,6 +59,18 @@ export function AppShell({
               >
                 <i className="ph-duotone ph-gear-six" aria-hidden />
               </Link>
+              {/* Đăng xuất — form POST tới /auth/signout (không cần JS) */}
+              <form action="/auth/signout" method="post" className="contents">
+                <button
+                  type="submit"
+                  aria-label="Đăng xuất"
+                  title="Đăng xuất"
+                  className="w-[38px] h-[38px] rounded-full flex items-center justify-center text-[#DCEDE4] text-[17px] cursor-pointer hover:bg-white/10"
+                  style={{ border: "1px solid rgba(255,255,255,0.22)" }}
+                >
+                  <i className="ph-duotone ph-sign-out" aria-hidden />
+                </button>
+              </form>
               <div className="flex items-center gap-[10px]">
                 <div className="w-[38px] h-[38px] rounded-full bg-[#E7A87B] text-[#5B3213] flex items-center justify-center text-[13px] font-extrabold">
                   {user.initials}
