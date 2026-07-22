@@ -206,6 +206,49 @@ export type MonthCloseStatus = {
   isReopened: boolean;
 };
 
+export type ClosedMonth = {
+  month_key: string;
+  cash: number;
+  gold: number;
+  stock: number;
+  deposits: number;
+  total: number;
+  income_received: number;
+  expense: number;
+  net: number;
+  savings_rate: number;
+  as_of_date: string | null;
+  is_reopened: boolean;
+  taken_at: string | null;
+};
+
+/** Lịch sử các tháng đã chốt (snapshot đầy đủ), mới → cũ. Cho trang History. */
+export async function getClosedMonths(): Promise<ClosedMonth[]> {
+  const sb = await createClient();
+  const { data, error } = await sb
+    .from("net_worth_snapshots")
+    .select(
+      "month_key, cash, gold, stock, deposits, total, income_received, expense, net, savings_rate, as_of_date, is_reopened, taken_at, mk:month_keys!inner(sort)"
+    )
+    .order("sort", { referencedTable: "month_keys", ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    month_key: r.month_key,
+    cash: Number(r.cash),
+    gold: Number(r.gold),
+    stock: Number(r.stock),
+    deposits: Number(r.deposits),
+    total: Number(r.total),
+    income_received: Number(r.income_received),
+    expense: Number(r.expense),
+    net: Number(r.net),
+    savings_rate: Number(r.savings_rate),
+    as_of_date: r.as_of_date ?? null,
+    is_reopened: !!r.is_reopened,
+    taken_at: r.taken_at ?? null,
+  }));
+}
+
 /** Trạng thái chốt của 1 tháng: đã đóng chưa + thời điểm chốt + snapshot as-of. */
 export async function getMonthCloseStatus(monthKey: string): Promise<MonthCloseStatus> {
   const sb = await createClient();

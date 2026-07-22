@@ -100,4 +100,5 @@ export const navItems = [
   { href: "/assets", label: "Assets", icon: "ph-duotone ph-coins" },
   { href: "/investments", label: "Invest", icon: "ph-duotone ph-chart-line-up" },
   { href: "/forecast", label: "Forecast", icon: "ph-duotone ph-chart-line" },
+  { href: "/history", label: "Lịch sử", icon: "ph-duotone ph-clock-counter-clockwise" },
 ] as const;

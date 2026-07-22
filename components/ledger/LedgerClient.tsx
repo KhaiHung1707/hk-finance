@@ -30,6 +30,8 @@ function rowName(r: LedgerRow): string {
 
 export function LedgerClient({
   monthKey,
+  months = [],
+  closed = false,
   rows,
   summary,
   sources,
@@ -37,6 +39,8 @@ export function LedgerClient({
   accounts,
 }: {
   monthKey: string;
+  months?: string[];
+  closed?: boolean;
   rows: LedgerRow[];
   summary: MonthlySummary | null;
   sources: Ref[];
@@ -131,10 +135,32 @@ export function LedgerClient({
 
       {/* Filter bar */}
       <div className="bg-card border border-card-border rounded-[16px] px-4 py-3 flex items-center gap-[10px] flex-wrap">
-        <div className="flex items-center gap-[7px] bg-primary text-white rounded-full px-[14px] py-[8px] text-[12px] font-bold">
+        {/* Month picker — đổi tháng qua URL */}
+        <div className="flex items-center gap-[7px] bg-primary text-white rounded-full pl-[14px] pr-2 py-[6px] text-[12px] font-bold">
           <i className="ph-duotone ph-calendar-blank" aria-hidden />
-          {monthKey}
+          {months.length > 0 ? (
+            <select
+              value={monthKey}
+              onChange={(e) => router.push(`/ledger?month=${encodeURIComponent(e.target.value)}`)}
+              className="bg-transparent text-white border-0 outline-none cursor-pointer font-bold text-[12px] [&>option]:text-ink"
+              aria-label="Chọn tháng"
+            >
+              {months.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span>{monthKey}</span>
+          )}
         </div>
+        {closed && (
+          <div className="flex items-center gap-[6px] bg-[#DFF2E7] text-[#1F7A5C] rounded-full px-[12px] py-[7px] text-[11px] font-bold">
+            <i className="ph-duotone ph-lock-simple" aria-hidden />
+            Đã chốt — chỉ đọc
+          </div>
+        )}
         <select value={typeF} onChange={(e) => setTypeF(e.target.value)} className={filterChip}>
           <option value="all">Type: All</option>
           <option value="income">Income</option>
@@ -216,32 +242,39 @@ export function LedgerClient({
                 {r.note || "—"}
               </div>
               <div className="flex justify-end items-center gap-[6px]">
-                {r.status === "pending" && (
-                  <button
-                    onClick={() =>
-                      setReceiveTx({ id: r.id, amount: r.amount, label: `${rowName(r)} · ${r.month_key}` })
-                    }
-                    className="bg-primary text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
-                  >
-                    Nhận tiền
-                  </button>
+                {/* Tháng đã chốt → chỉ đọc (trigger DB chặn ghi) */}
+                {closed ? (
+                  <span className="text-faint text-[11px]">—</span>
+                ) : (
+                  <>
+                    {r.status === "pending" && (
+                      <button
+                        onClick={() =>
+                          setReceiveTx({ id: r.id, amount: r.amount, label: `${rowName(r)} · ${r.month_key}` })
+                        }
+                        className="bg-primary text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
+                      >
+                        Nhận tiền
+                      </button>
+                    )}
+                    <button
+                      onClick={() => openEdit(r)}
+                      aria-label="Sửa giao dịch"
+                      title={r.ref_table ? "Sửa (chỉ ghi chú — tx từ module)" : "Sửa"}
+                      className="text-muted hover:text-primary text-[14px] w-[26px] h-[26px] flex items-center justify-center"
+                    >
+                      <i className="ph-duotone ph-pencil-simple" aria-hidden />
+                    </button>
+                    <button
+                      onClick={() => removeTx(r)}
+                      aria-label="Xoá giao dịch"
+                      title="Xoá"
+                      className="text-muted hover:text-[#B4573B] text-[14px] w-[26px] h-[26px] flex items-center justify-center"
+                    >
+                      <i className="ph-duotone ph-trash" aria-hidden />
+                    </button>
+                  </>
                 )}
-                <button
-                  onClick={() => openEdit(r)}
-                  aria-label="Sửa giao dịch"
-                  title={r.ref_table ? "Sửa (chỉ ghi chú — tx từ module)" : "Sửa"}
-                  className="text-muted hover:text-primary text-[14px] w-[26px] h-[26px] flex items-center justify-center"
-                >
-                  <i className="ph-duotone ph-pencil-simple" aria-hidden />
-                </button>
-                <button
-                  onClick={() => removeTx(r)}
-                  aria-label="Xoá giao dịch"
-                  title="Xoá"
-                  className="text-muted hover:text-[#B4573B] text-[14px] w-[26px] h-[26px] flex items-center justify-center"
-                >
-                  <i className="ph-duotone ph-trash" aria-hidden />
-                </button>
               </div>
             </div>
           );

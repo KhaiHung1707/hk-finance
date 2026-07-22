@@ -103,9 +103,10 @@ export async function getForecastStart(): Promise<ForecastStart> {
 /** net_worth_snapshots (month_key + total) — overlay actual vs forecast. Có thể rỗng. */
 export async function getForecastSnapshots(): Promise<ForecastSnapshot[]> {
   const sb = await createClient();
+  // order theo month_keys.sort (không theo text month_key — "T10/26" < "T2/26" sai).
   const { data } = await sb
     .from("net_worth_snapshots")
-    .select("month_key, total")
-    .order("month_key");
+    .select("month_key, total, mk:month_keys!inner(sort)")
+    .order("sort", { referencedTable: "month_keys", ascending: true });
   return (data ?? []).map((r) => ({ month_key: r.month_key, total: Number(r.total) }));
 }

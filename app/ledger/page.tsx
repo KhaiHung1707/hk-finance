@@ -7,19 +7,30 @@ import {
   getExpenseCategories,
   getAccountsRef,
   getBaselineMonthKey,
+  getMonthKeys,
+  getMonthCloseStatus,
   getProfile,
 } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function LedgerPage() {
-  const monthKey = await getBaselineMonthKey();
-  const [rows, summary, sources, categories, accounts, profile] = await Promise.all([
+export default async function LedgerPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
+  const sp = await searchParams;
+  const [baseline, allMonths] = await Promise.all([getBaselineMonthKey(), getMonthKeys()]);
+  // tháng đang xem: URL param nếu hợp lệ, ngược lại baseline.
+  const monthKey = sp.month && allMonths.includes(sp.month) ? sp.month : baseline;
+
+  const [rows, summary, sources, categories, accounts, closeStatus, profile] = await Promise.all([
     getLedgerRows(monthKey),
     getMonthlySummary(monthKey),
     getIncomeSources(),
     getExpenseCategories(),
     getAccountsRef(),
+    getMonthCloseStatus(monthKey),
     getProfile(),
   ]);
 
@@ -32,6 +43,8 @@ export default async function LedgerPage() {
     >
       <LedgerClient
         monthKey={monthKey}
+        months={allMonths}
+        closed={closeStatus.closed}
         rows={rows}
         summary={summary}
         sources={sources}
