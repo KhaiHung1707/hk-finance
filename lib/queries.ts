@@ -16,6 +16,7 @@ export type LedgerRow = {
   amount: number;
   month_key: string;
   note: string | null;
+  ref_table: string | null; // null = tx nhập tay; ngược lại sinh từ module
   account_name: string | null;
   counter_account_name: string | null;
   source_name: string | null;
@@ -139,7 +140,7 @@ export async function getLedgerRows(monthKey?: string): Promise<LedgerRow[]> {
   let q = sb
     .from("transactions")
     .select(
-      `id, type, status, amount, month_key, note, created_at,
+      `id, type, status, amount, month_key, note, created_at, ref_table,
        account:accounts!transactions_account_id_fkey(name),
        counter:accounts!transactions_counter_account_id_fkey(name),
        source:income_sources(name),
@@ -157,6 +158,7 @@ export async function getLedgerRows(monthKey?: string): Promise<LedgerRow[]> {
     amount: Number(r.amount),
     month_key: r.month_key,
     note: r.note,
+    ref_table: r.ref_table ?? null,
     account_name: r.account?.name ?? null,
     counter_account_name: r.counter?.name ?? null,
     source_name: r.source?.name ?? null,

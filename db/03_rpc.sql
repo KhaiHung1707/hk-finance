@@ -173,6 +173,70 @@ begin
   end if;
 end $$;
 
+-- ---------- update_transaction ----------------------------------------------
+-- Sửa tx từ Ledger. Tx nhập tay (ref_table null): sửa amount/note/month_key.
+-- Tx sinh từ module: CHỈ sửa note (đổi amount sẽ lệch module → phải sửa ở module gốc).
+create or replace function update_transaction(
+  p_tx_id uuid, p_amount bigint, p_note text, p_month_key text
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_ref_table text;
+begin
+  select ref_table into v_ref_table from transactions where id = p_tx_id for update;
+  if not found then raise exception 'update_transaction: tx không tồn tại'; end if;
+
+  if v_ref_table is null then
+    if p_amount is null or p_amount < 0 then raise exception 'update_transaction: amount không âm'; end if;
+    perform ensure_month(p_month_key);
+    update transactions set amount = p_amount, note = p_note, month_key = p_month_key where id = p_tx_id;
+  else
+    -- tx module: chỉ đổi note để tránh lệch số liệu module.
+    update transactions set note = p_note where id = p_tx_id;
+  end if;
+end $$;
+
+-- ---------- delete_transaction ----------------------------------------------
+-- Xoá hẳn tx từ Ledger + ĐỒNG BỘ module gốc (đảo ngược như cancel, nhưng xoá tx).
+-- Xoá tx → hoàn nguyên số dư. Với tx module, đưa module về trạng thái trước khi có tx.
+create or replace function delete_transaction(p_tx_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_ref_table text; v_ref_id uuid;
+begin
+  select ref_table, ref_id into v_ref_table, v_ref_id from transactions where id = p_tx_id for update;
+  if not found then raise exception 'delete_transaction: tx không tồn tại'; end if;
+
+  -- đồng bộ module gốc trước (đảo ngược), rồi xoá tx.
+  if v_ref_table = 'milestones' then
+    update milestones set status = 'draft', fx_rate = null, amount_vnd = null,
+      income_tx_id = null, billed_on = null, received_on = null where id = v_ref_id;
+  elsif v_ref_table = 'upwork_contracts' then
+    update upwork_contracts set status = 'draft', fx_rate = null, amount_vnd = null,
+      income_tx_id = null, billed_on = null, received_on = null where id = v_ref_id;
+  elsif v_ref_table = 'print_orders' then
+    update print_orders set status = 'draft' where id = v_ref_id;
+  elsif v_ref_table = 'term_deposits' then
+    -- nếu là tx tất toán → sổ về active; nếu tx mở sổ → xoá sổ.
+    if exists (select 1 from term_deposits where id = v_ref_id and settle_tx_id = p_tx_id) then
+      update term_deposits set status = 'active', settle_tx_id = null where id = v_ref_id;
+    else
+      delete from term_deposits where id = v_ref_id;
+    end if;
+  elsif v_ref_table = 'stock_trades' then
+    delete from stock_trades where id = v_ref_id;
+  elsif v_ref_table = 'dividends' then
+    delete from dividends where id = v_ref_id;
+  elsif v_ref_table = 'gold_lots' then
+    if exists (select 1 from gold_lots where id = v_ref_id and purchase_tx_id = p_tx_id) then
+      delete from gold_lots where id = v_ref_id;
+    else
+      update gold_lots set status = 'held', sold_tx_id = null, sold_price = null, sold_on = null
+      where id = v_ref_id and sold_tx_id = p_tx_id;
+    end if;
+  end if;
+
+  delete from transactions where id = p_tx_id;
+end $$;
+
 -- ---------- close_month ------------------------------------------------------
 -- Chốt số net worth hiện tại vào snapshot cho tháng chỉ định.
 create or replace function close_month(p_month_key text)

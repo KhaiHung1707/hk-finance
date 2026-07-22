@@ -106,6 +106,34 @@ export async function cancelTransaction(txId: string) {
   return { ok: true };
 }
 
+export async function updateTransaction(input: {
+  id: string;
+  amount: number;
+  note: string;
+  monthKey: string;
+}) {
+  const sb = await createClient();
+  const amount = Math.round(input.amount || 0);
+  if (amount < 0) return { ok: false, error: "Số tiền không âm" };
+  const { error } = await sb.rpc("update_transaction", {
+    p_tx_id: input.id,
+    p_amount: amount,
+    p_note: input.note || null,
+    p_month_key: input.monthKey,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
+
+export async function deleteTransaction(txId: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_transaction", { p_tx_id: txId });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
+
 export async function closeMonth(monthKey: string) {
   const sb = await createClient();
   const { error } = await sb.rpc("close_month", { p_month_key: monthKey });

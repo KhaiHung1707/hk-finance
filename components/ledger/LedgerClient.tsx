@@ -1,11 +1,16 @@
 "use client";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { fmt, full } from "@/lib/format";
 import { txTypeStyle, txStatusStyle, sourceIcon } from "@/lib/design/tokens";
 import { Badge } from "@/components/ui/Badge";
+import { Modal, ModalActions } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
+import { Field, FieldRow, TextInput } from "@/components/ui/Field";
 import { EntryModal } from "./EntryModal";
 import { ReceiveModal } from "./ReceiveModal";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { updateTransaction, deleteTransaction } from "@/lib/actions/ledger";
 import type { LedgerRow, MonthlySummary, Ref } from "@/lib/queries";
 
 const GRID = "70px 100px 1.4fr 130px 110px 130px 1fr 150px";
@@ -38,8 +43,50 @@ export function LedgerClient({
   categories: Ref[];
   accounts: Ref[];
 }) {
+  const router = useRouter();
   const [entryKind, setEntryKind] = useState<"income" | "expense" | null>(null);
   const [receiveTx, setReceiveTx] = useState<{ id: string; amount: number; label: string } | null>(null);
+
+  // edit tx
+  const [edit, setEdit] = useState<LedgerRow | null>(null);
+  const [eAmount, setEAmount] = useState("");
+  const [eNote, setENote] = useState("");
+  const [eMonth, setEMonth] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [eErr, setEErr] = useState<string | null>(null);
+  const isModuleTx = !!edit?.ref_table;
+
+  function openEdit(r: LedgerRow) {
+    setEdit(r);
+    setEAmount(String(r.amount));
+    setENote(r.note ?? "");
+    setEMonth(r.month_key);
+    setEErr(null);
+  }
+  async function saveEdit() {
+    if (!edit) return;
+    setBusy(true);
+    setEErr(null);
+    const res = await updateTransaction({
+      id: edit.id,
+      amount: Number(eAmount) || 0,
+      note: eNote,
+      monthKey: eMonth,
+    });
+    setBusy(false);
+    if (!res.ok) return setEErr(res.error ?? "Lỗi");
+    setEdit(null);
+    router.refresh();
+  }
+  async function removeTx(r: LedgerRow) {
+    const warn = r.ref_table
+      ? `Xoá giao dịch này? Nó sinh từ module (${r.ref_table}) — module gốc sẽ được hoàn về trạng thái trước.`
+      : "Xoá giao dịch này? Số dư sẽ được hoàn nguyên.";
+    if (!confirm(warn)) return;
+    const res = await deleteTransaction(r.id);
+    if (!res.ok) return alert(res.error);
+    router.refresh();
+  }
 
   const [typeF, setTypeF] = useState("all");
   const [statusF, setStatusF] = useState("all");
@@ -168,7 +215,7 @@ export function LedgerClient({
               <div className="text-muted text-[12px] whitespace-nowrap overflow-hidden text-ellipsis">
                 {r.note || "—"}
               </div>
-              <div className="flex justify-end gap-[6px]">
+              <div className="flex justify-end items-center gap-[6px]">
                 {r.status === "pending" && (
                   <button
                     onClick={() =>
@@ -179,6 +226,22 @@ export function LedgerClient({
                     Nhận tiền
                   </button>
                 )}
+                <button
+                  onClick={() => openEdit(r)}
+                  aria-label="Sửa giao dịch"
+                  title={r.ref_table ? "Sửa (chỉ ghi chú — tx từ module)" : "Sửa"}
+                  className="text-muted hover:text-primary text-[14px] w-[26px] h-[26px] flex items-center justify-center"
+                >
+                  <i className="ph-duotone ph-pencil-simple" aria-hidden />
+                </button>
+                <button
+                  onClick={() => removeTx(r)}
+                  aria-label="Xoá giao dịch"
+                  title="Xoá"
+                  className="text-muted hover:text-[#B4573B] text-[14px] w-[26px] h-[26px] flex items-center justify-center"
+                >
+                  <i className="ph-duotone ph-trash" aria-hidden />
+                </button>
               </div>
             </div>
           );
@@ -214,6 +277,47 @@ export function LedgerClient({
         accounts={accounts}
       />
       <ReceiveModal tx={receiveTx} accounts={accounts} onClose={() => setReceiveTx(null)} />
+
+      {/* Sửa giao dịch */}
+      <Modal open={edit !== null} onClose={() => setEdit(null)} title="Sửa giao dịch" icon="ph-duotone ph-pencil-simple" width={440}>
+        {edit && (
+          <>
+            {isModuleTx && (
+              <div className="bg-[#FBF0DC] border border-[#EBD9AE] text-[#A5731F] rounded-[10px] px-3 py-[10px] text-[12px] mb-3 leading-[1.5]">
+                Giao dịch này sinh từ module <b>{edit.ref_table}</b>. Chỉ sửa được <b>ghi chú</b> ở đây;
+                số tiền/tháng phải sửa ở module gốc để không lệch dữ liệu.
+              </div>
+            )}
+            <div className="flex flex-col gap-[14px]">
+              <FieldRow>
+                <Field label="Số tiền (₫)">
+                  <TextInput
+                    type="number"
+                    value={eAmount}
+                    onChange={(e) => setEAmount(e.target.value)}
+                    disabled={isModuleTx}
+                  />
+                </Field>
+                <Field label="Tháng (VD T7/26)">
+                  <TextInput value={eMonth} onChange={(e) => setEMonth(e.target.value)} disabled={isModuleTx} />
+                </Field>
+              </FieldRow>
+              <Field label="Ghi chú">
+                <TextInput value={eNote} onChange={(e) => setENote(e.target.value)} />
+              </Field>
+              {eErr && <div className="text-[12px] text-[#B4573B] font-semibold">{eErr}</div>}
+            </div>
+            <ModalActions>
+              <Button variant="ghost" className="flex-1" onClick={() => setEdit(null)}>
+                Huỷ
+              </Button>
+              <Button variant="primary" className="flex-1" onClick={saveEdit} disabled={busy}>
+                {busy ? "…" : "Lưu"}
+              </Button>
+            </ModalActions>
+          </>
+        )}
+      </Modal>
     </>
   );
 }
