@@ -94,7 +94,7 @@ begin
           now(), 'term_deposits', p_id)
   returning id into v_tx;
 
-  update term_deposits set status = v_new_status, settle_tx_id = v_tx where id = p_id;
+  update term_deposits set status = v_new_status, settle_tx_id = v_tx, settled_on = v_settle where id = p_id;
   return v_tx;
 end $$;
 
@@ -491,6 +491,71 @@ begin
   delete from dividends where id = p_id;
   if v_tx is not null then delete from transactions where id = v_tx; end if;
 end $$;
+
+-- =============================================================================
+-- AS-OF: tái dựng net worth tại CUỐI một tháng quá khứ (Phase 2).
+-- Ngày hiệu lực của tx = coalesce(occurred_on, created_at::date).
+-- =============================================================================
+create or replace function net_worth_asof(p_eom date)
+returns table(cash bigint, gold bigint, stock bigint, deposits bigint, total bigint)
+language sql stable security definer set search_path = public as $$
+with
+-- CASH: số dư mọi tài khoản tính tới hết p_eom (income − expense − transfer_out + transfer_in).
+tx as (
+  select * from transactions
+  where status = 'received' and coalesce(occurred_on, created_at::date) <= p_eom
+),
+cash_c as (
+  -- khớp v_account_balances: opening_balance + income − expense − transfer_out + transfer_in.
+  select
+    (select coalesce(sum(opening_balance),0) from accounts)
+  + coalesce(sum(amount) filter (where type='income'  and account_id is not null),0)
+  - coalesce(sum(amount) filter (where type='expense' and account_id is not null),0)
+  - coalesce(sum(amount) filter (where type='transfer' and account_id is not null),0)
+  + coalesce(sum(amount) filter (where type='transfer' and counter_account_id is not null),0)
+    as v from tx
+),
+-- GOLD: lô đang giữ tại p_eom × giá gold gần nhất ≤ p_eom.
+gold_price as (
+  select price from market_prices
+  where asset_key = 'gold_ring' and as_of <= p_eom
+  order by as_of desc limit 1
+),
+gold_c as (
+  select coalesce(sum(gl.quantity * (select price from gold_price)),0)::bigint as v
+  from gold_lots gl
+  where gl.purchased_on <= p_eom and (gl.sold_on is null or gl.sold_on > p_eom)
+),
+-- STOCK: qty ròng theo traded_on ≤ p_eom × giá gần nhất ≤ p_eom, mỗi ticker.
+stock_pos as (
+  select st.ticker,
+    sum(case when st.side='buy' then st.qty else -st.qty end) as qty
+  from stock_trades st
+  where st.traded_on <= p_eom
+  group by st.ticker
+),
+stock_c as (
+  select coalesce(sum(sp.qty * (
+    select mp.price from market_prices mp
+    where mp.asset_key = sp.ticker and mp.as_of <= p_eom
+    order by mp.as_of desc limit 1
+  )),0)::bigint as v
+  from stock_pos sp
+  where sp.qty > 0
+),
+-- DEPOSITS: sổ đã mở ≤ p_eom và chưa tất toán tại p_eom.
+dep_c as (
+  select coalesce(sum(principal),0)::bigint as v
+  from term_deposits
+  where start_on <= p_eom and (settled_on is null or settled_on > p_eom)
+)
+select
+  (select v from cash_c)::bigint,
+  (select v from gold_c),
+  (select v from stock_c),
+  (select v from dep_c),
+  ((select v from cash_c) + (select v from gold_c) + (select v from stock_c) + (select v from dep_c))::bigint;
+$$;
 
 -- =============================================================================
 -- FUNCTION PRIVILEGES (chạy CUỐI CÙNG — sau khi mọi RPC P1/P2/P3 đã tạo).

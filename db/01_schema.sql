@@ -230,6 +230,8 @@ create table if not exists print_orders (
 
 -- ---------- Snapshots ---------------------------------------------------------
 
+-- Snapshot chốt sổ theo tháng: net worth (as-of cuối tháng) + dòng tiền tháng.
+-- Một hàng = một lần chốt tháng. Ghi bởi close_month; đọc bởi Forecast/history.
 create table if not exists net_worth_snapshots (
   month_key text primary key references month_keys(key),
   cash      bigint not null default 0,
@@ -237,6 +239,14 @@ create table if not exists net_worth_snapshots (
   stock     bigint not null default 0,
   deposits  bigint not null default 0,
   total     bigint not null default 0,
+  -- dòng tiền tháng (freeze từ v_monthly_summary lúc chốt) — không đổi hồi tố nữa
+  income_recognized bigint not null default 0,
+  income_received   bigint not null default 0,
+  expense           bigint not null default 0,
+  net               bigint not null default 0,
+  savings_rate      numeric not null default 0,
+  as_of_date        date,                 -- ngày cuối tháng dùng để tính as-of
+  is_reopened       boolean not null default false, -- đã từng mở lại (rollback)
   taken_at  timestamptz not null default now()
 );
 
@@ -257,3 +267,14 @@ create table if not exists app_profile (
 alter table milestones        add column if not exists received_on date;
 alter table upwork_contracts  add column if not exists billed_on   date;
 alter table upwork_contracts  add column if not exists received_on date;
+
+-- Chốt theo tháng (Phase 1/2): khoá tháng + snapshot dòng tiền + as-of.
+alter table month_keys           add column if not exists closed_at timestamptz;
+alter table term_deposits        add column if not exists settled_on date;
+alter table net_worth_snapshots  add column if not exists income_recognized bigint not null default 0;
+alter table net_worth_snapshots  add column if not exists income_received   bigint not null default 0;
+alter table net_worth_snapshots  add column if not exists expense           bigint not null default 0;
+alter table net_worth_snapshots  add column if not exists net               bigint not null default 0;
+alter table net_worth_snapshots  add column if not exists savings_rate      numeric not null default 0;
+alter table net_worth_snapshots  add column if not exists as_of_date        date;
+alter table net_worth_snapshots  add column if not exists is_reopened       boolean not null default false;

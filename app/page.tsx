@@ -18,6 +18,7 @@ import {
   getBaselineMonthKey,
   getProfile,
   getAccountsRef,
+  getMonthCloseStatus,
 } from "@/lib/queries";
 import { getForecastParams, getForecastStart, getForecastSnapshots } from "@/lib/queries/forecast";
 import { getHouseGoal } from "@/lib/queries/settings";
@@ -33,7 +34,7 @@ const ALLOC_META: Record<string, { label: string; color: string }> = {
 
 export default async function DashboardPage() {
   const monthKey = await getBaselineMonthKey();
-  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, snapshots, houseGoal] =
+  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, snapshots, closeStatus, houseGoal] =
     await Promise.all([
       getAccountBalances(),
       getMonthlySummary(monthKey),
@@ -45,6 +46,7 @@ export default async function DashboardPage() {
       getForecastParams(),
       getForecastStart(),
       getForecastSnapshots(),
+      getMonthCloseStatus(monthKey),
       getHouseGoal(),
     ]);
 
@@ -72,7 +74,7 @@ export default async function DashboardPage() {
       bandPadBottom={96}
       pullUp={64}
     >
-      <CloseMonthButton monthKey={monthKey} closed={false} />
+      <CloseMonthButton monthKey={monthKey} closed={closeStatus.closed} />
 
       {/* Stat cards */}
       <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))" }}>

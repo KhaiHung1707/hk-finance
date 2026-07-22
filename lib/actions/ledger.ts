@@ -141,3 +141,12 @@ export async function closeMonth(monthKey: string) {
   revalidate();
   return { ok: true };
 }
+
+/** Mở lại tháng đã chốt (rollback nếu lỡ bấm nhầm). */
+export async function reopenMonth(monthKey: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("reopen_month", { p_month_key: monthKey });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}

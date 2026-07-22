@@ -198,6 +198,34 @@ export async function getMonthKeys(): Promise<string[]> {
   return (data ?? []).map((r) => r.key);
 }
 
+export type MonthCloseStatus = {
+  closed: boolean;
+  closedAt: string | null;
+  takenAt: string | null;
+  asOfDate: string | null;
+  isReopened: boolean;
+};
+
+/** Trạng thái chốt của 1 tháng: đã đóng chưa + thời điểm chốt + snapshot as-of. */
+export async function getMonthCloseStatus(monthKey: string): Promise<MonthCloseStatus> {
+  const sb = await createClient();
+  const [{ data: mk }, { data: snap }] = await Promise.all([
+    sb.from("month_keys").select("closed_at").eq("key", monthKey).maybeSingle(),
+    sb
+      .from("net_worth_snapshots")
+      .select("taken_at, as_of_date, is_reopened")
+      .eq("month_key", monthKey)
+      .maybeSingle(),
+  ]);
+  return {
+    closed: !!mk?.closed_at,
+    closedAt: mk?.closed_at ?? null,
+    takenAt: snap?.taken_at ?? null,
+    asOfDate: snap?.as_of_date ?? null,
+    isReopened: !!snap?.is_reopened,
+  };
+}
+
 /**
  * month_key làm việc mặc định. Ưu tiên settings.baseline_month_key (seed từ _meta),
  * rồi tháng MỚI NHẤT CÓ GIAO DỊCH, cuối cùng fallback 'T7/26'.

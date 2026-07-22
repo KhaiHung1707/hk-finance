@@ -1,18 +1,31 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
-import { closeMonth } from "@/lib/actions/ledger";
+import { closeMonth, reopenMonth } from "@/lib/actions/ledger";
 
-/** Nút "Close month" ở header — gọi close_month(monthKey) → upsert snapshot. */
+/**
+ * Nút chốt/mở lại tháng ở header. Khi đã chốt → hiện trạng thái + nút Mở lại
+ * (rollback nếu lỡ bấm nhầm). Trạng thái `closed` đến từ server (getMonthCloseStatus).
+ */
 export function CloseMonthButton({ monthKey, closed }: { monthKey: string; closed: boolean }) {
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(closed);
 
   async function onClose() {
     setBusy(true);
     const res = await closeMonth(monthKey);
     setBusy(false);
-    if (res.ok) setDone(true);
+    if (!res.ok) return alert(res.error);
+    router.refresh();
+  }
+  async function onReopen() {
+    if (!confirm(`Mở lại tháng ${monthKey}? Tháng sẽ cho phép ghi/sửa lại (rollback chốt sổ).`)) return;
+    setBusy(true);
+    const res = await reopenMonth(monthKey);
+    setBusy(false);
+    if (!res.ok) return alert(res.error);
+    router.refresh();
   }
 
   return (
@@ -21,10 +34,21 @@ export function CloseMonthButton({ monthKey, closed }: { monthKey: string; close
         <i className="ph-duotone ph-calendar-blank" aria-hidden />
         {monthKey}
       </div>
-      {done ? (
-        <div className="flex items-center gap-2 bg-[#2E7D64] text-white rounded-full px-[22px] py-[12px] text-[13px] font-bold">
-          <i className="ph-duotone ph-check-circle" aria-hidden />
-          {monthKey} closed
+      {closed ? (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-[#2E7D64] text-white rounded-full px-[18px] py-[12px] text-[13px] font-bold">
+            <i className="ph-duotone ph-check-circle" aria-hidden />
+            {monthKey} đã chốt
+          </div>
+          <button
+            onClick={onReopen}
+            disabled={busy}
+            title="Mở lại tháng (rollback)"
+            className="flex items-center gap-2 bg-white/10 text-white border border-white/20 rounded-full px-[16px] py-[12px] text-[13px] font-bold cursor-pointer hover:bg-white/20 disabled:opacity-60"
+          >
+            <i className="ph-duotone ph-lock-key-open" aria-hidden />
+            {busy ? "…" : "Mở lại"}
+          </button>
         </div>
       ) : (
         <button
@@ -33,7 +57,7 @@ export function CloseMonthButton({ monthKey, closed }: { monthKey: string; close
           className="flex items-center gap-2 bg-primary-dark text-white border-0 rounded-full px-[22px] py-[12px] text-[13px] font-bold cursor-pointer hover:bg-[#0A211C] disabled:opacity-60"
         >
           <i className="ph-duotone ph-flag-checkered" aria-hidden />
-          {busy ? "Đang chốt…" : "Close month"}
+          {busy ? "Đang chốt…" : "Chốt tháng"}
         </button>
       )}
     </HeaderPortal>

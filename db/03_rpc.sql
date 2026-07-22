@@ -238,20 +238,82 @@ begin
 end $$;
 
 -- ---------- close_month ------------------------------------------------------
--- Chốt số net worth hiện tại vào snapshot cho tháng chỉ định.
+-- Chốt sổ tháng: net worth AS-OF cuối tháng + dòng tiền tháng (freeze) + khoá tháng.
+-- Idempotent: chốt lại cùng tháng ghi đè snapshot (giữ is_reopened). Set closed_at.
 create or replace function close_month(p_month_key text)
 returns void
 language plpgsql security definer set search_path = public as $$
-declare v_cash bigint; v_gold bigint; v_stock bigint; v_dep bigint; v_total bigint;
+declare
+  v_eom date; v_cash bigint; v_gold bigint; v_stock bigint; v_dep bigint; v_total bigint;
+  v_rec bigint; v_recv bigint; v_exp bigint; v_net bigint; v_sav numeric;
 begin
   perform ensure_month(p_month_key);
+  -- ngày cuối tháng của month_key.
+  select (make_date(year, month, 1) + interval '1 month - 1 day')::date into v_eom
+  from month_keys where key = p_month_key;
+
+  -- net worth AS-OF cuối tháng (không phải hiện tại).
   select cash, gold, stock, deposits, total
     into v_cash, v_gold, v_stock, v_dep, v_total
-  from v_net_worth;
+  from net_worth_asof(v_eom);
 
-  insert into net_worth_snapshots(month_key, cash, gold, stock, deposits, total, taken_at)
-  values (p_month_key, v_cash, v_gold, v_stock, v_dep, v_total, now())
-  on conflict (month_key) do update
-    set cash = excluded.cash, gold = excluded.gold, stock = excluded.stock,
-        deposits = excluded.deposits, total = excluded.total, taken_at = now();
+  -- dòng tiền tháng (freeze từ v_monthly_summary tại thời điểm chốt).
+  select recognized, received, expense, net, savings_rate
+    into v_rec, v_recv, v_exp, v_net, v_sav
+  from v_monthly_summary where month_key = p_month_key;
+
+  insert into net_worth_snapshots(
+    month_key, cash, gold, stock, deposits, total,
+    income_recognized, income_received, expense, net, savings_rate,
+    as_of_date, taken_at
+  ) values (
+    p_month_key, v_cash, v_gold, v_stock, v_dep, v_total,
+    coalesce(v_rec,0), coalesce(v_recv,0), coalesce(v_exp,0), coalesce(v_net,0), coalesce(v_sav,0),
+    v_eom, now()
+  )
+  on conflict (month_key) do update set
+    cash = excluded.cash, gold = excluded.gold, stock = excluded.stock,
+    deposits = excluded.deposits, total = excluded.total,
+    income_recognized = excluded.income_recognized, income_received = excluded.income_received,
+    expense = excluded.expense, net = excluded.net, savings_rate = excluded.savings_rate,
+    as_of_date = excluded.as_of_date, taken_at = now();
+
+  -- khoá tháng.
+  update month_keys set closed_at = now() where key = p_month_key;
 end $$;
+
+-- ---------- reopen_month (rollback nếu lỡ chốt nhầm) -------------------------
+-- Mở lại tháng đã chốt: gỡ khoá + đánh dấu is_reopened (giữ dấu vết). Snapshot giữ
+-- nguyên để tham chiếu; chốt lại sẽ ghi đè.
+create or replace function reopen_month(p_month_key text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update month_keys set closed_at = null where key = p_month_key;
+  update net_worth_snapshots set is_reopened = true where month_key = p_month_key;
+end $$;
+
+-- ---------- Trigger: chặn ghi vào THÁNG ĐÃ CHỐT ------------------------------
+-- RLS `with check(true)` mở đường ghi thẳng bảng → month-lock phải ở trigger DB.
+-- Chặn INSERT/UPDATE/DELETE transactions nếu month_key (nguồn HOẶC đích) đã closed.
+-- Muốn ghi lại → reopen_month trước.
+create or replace function block_closed_month() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_keys text[]; v_key text;
+begin
+  -- đích (INSERT/UPDATE) và nguồn (UPDATE/DELETE) — chặn nếu bất kỳ tháng nào đã đóng.
+  v_keys := array_remove(array[
+    case when TG_OP <> 'DELETE' then NEW.month_key end,
+    case when TG_OP <> 'INSERT' then OLD.month_key end
+  ], null);
+  foreach v_key in array v_keys loop
+    if exists (select 1 from month_keys where key = v_key and closed_at is not null) then
+      raise exception 'Tháng % đã chốt — mở lại (reopen) trước khi thay đổi', v_key;
+    end if;
+  end loop;
+  return coalesce(NEW, OLD);
+end $$;
+
+drop trigger if exists trg_block_closed_month on transactions;
+create trigger trg_block_closed_month
+  before insert or update or delete on transactions
+  for each row execute function block_closed_month();
