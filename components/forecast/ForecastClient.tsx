@@ -165,10 +165,26 @@ export function ForecastClient({
         />
       </div>
 
+      {/* Giả định kế hoạch — thanh nút nhỏ phía trên (mở modal) */}
+      <button
+        onClick={() => setShowAssumptions(true)}
+        className="bg-card border border-card-border rounded-[12px] px-4 py-[10px] flex items-center gap-[10px] cursor-pointer hover:border-primary transition-colors text-left w-full"
+      >
+        <i className="ph-duotone ph-sliders-horizontal text-primary text-[16px]" aria-hidden />
+        <span className="text-[13px] font-bold">Giả định kế hoạch</span>
+        <span className="text-[12px] text-muted hidden sm:inline">— chỉnh thu/chi dự phóng</span>
+        {assumptionCount > 0 && (
+          <span className="text-[11px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-[9px] py-[2px] whitespace-nowrap">
+            {assumptionCount} ước lượng
+          </span>
+        )}
+        <i className="ph-duotone ph-caret-right text-muted text-[15px] ml-auto" aria-hidden />
+      </button>
+
       {/* Chart + Asset-class growth — 2 cột (stack < lg) */}
-      <div className="grid gap-[14px] items-stretch grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+      <div className="grid gap-[14px] items-stretch grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px]">
       {/* Net-worth curve */}
-      <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
+      <div className="bg-card border border-card-border rounded-[18px] p-[18px]">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
@@ -245,25 +261,26 @@ export function ForecastClient({
         )}
       </div>
 
-      {/* Giả định kế hoạch — nút mở form (không show hết ra ngoài) */}
-      <button
-        onClick={() => setShowAssumptions(true)}
-        className="bg-card border border-card-border rounded-[18px] px-[22px] py-4 flex items-center gap-3 cursor-pointer hover:border-primary transition-colors text-left w-full"
-      >
-        <div className="w-[34px] h-[34px] rounded-[10px] bg-chip text-primary flex items-center justify-center text-[17px] flex-shrink-0">
-          <i className="ph-duotone ph-sliders-horizontal" aria-hidden />
+      {/* Cột phải — Asset-class growth (multi-line, giống Revenue by source) */}
+      <div className="bg-card border border-card-border rounded-[18px] p-[18px] flex flex-col">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+            <i className="ph-duotone ph-chart-donut" aria-hidden />
+          </div>
+          <div className="text-[15px] font-bold">Asset-class growth · {horizon}M</div>
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-bold">Giả định kế hoạch</div>
-          <div className="text-[12px] text-muted">Chỉnh thu/chi dự phóng — biểu đồ tính lại ngay.</div>
-        </div>
-        {assumptionCount > 0 && (
-          <span className="text-[11px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-[10px] py-[3px] whitespace-nowrap">
-            {assumptionCount} ước lượng
-          </span>
+        {groupSeries.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-[13px] text-faint">Chưa có tài sản.</div>
+        ) : (
+          <LineChart
+            labels={r.monthKeys}
+            series={groupSeries}
+            height={260}
+            ariaLabel="Tăng trưởng từng nhóm tài sản qua từng tháng"
+          />
         )}
-        <i className="ph-duotone ph-caret-right text-muted text-[16px]" aria-hidden />
-      </button>
+      </div>
+      </div>
 
       <Modal
         open={showAssumptions}
@@ -296,29 +313,8 @@ export function ForecastClient({
         </div>
       </Modal>
 
-      {/* Cột phải — Asset-class growth (multi-line, giống Revenue by source) */}
-      <div className="bg-card border border-card-border rounded-[18px] p-[22px] flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
-            <i className="ph-duotone ph-chart-donut" aria-hidden />
-          </div>
-          <div className="text-[15px] font-bold">Asset-class growth · {horizon}M</div>
-        </div>
-        {groupSeries.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-[13px] text-faint">Chưa có tài sản.</div>
-        ) : (
-          <LineChart
-            labels={r.monthKeys}
-            series={groupSeries}
-            height={260}
-            ariaLabel="Tăng trưởng từng nhóm tài sản qua từng tháng"
-          />
-        )}
-      </div>
-      </div>
-
       {/* Revenue per source + stacked bars */}
-      <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
+      <div className="bg-card border border-card-border rounded-[18px] p-[18px]">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">

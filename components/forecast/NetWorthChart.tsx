@@ -5,8 +5,10 @@ import type { ForecastSnapshot } from "@/lib/queries/forecast";
 
 /**
  * Biểu đồ Net-worth projection — DÙNG CHUNG cho Forecast và Dashboard.
- * SVG line/area/grid/overlay (goal line, receivables marker, snapshot) + hover
- * crosshair/dot/tooltip HTML (sắc nét, không méo). Mọi số đến từ props, không hardcode.
+ * Chiều cao co giãn theo bề rộng qua ASPECT-RATIO (không cố định px/clamp).
+ * SVG chỉ vẽ line/area/grid/marker (stretch theo khung); MỌI CHỮ (nhãn trục, "Mục
+ * tiêu", "thu về", tooltip) là HTML overlay → luôn sắc nét, cỡ chữ cố định, không
+ * méo khi màn to/nhỏ. Mọi số đến từ props, không hardcode.
  */
 export function NetWorthChart({
   nwSeries,
@@ -18,8 +20,10 @@ export function NetWorthChart({
   receivablesLandFirstMonth = false,
   snapshots = [],
   showActual = true,
-  // Cao co giãn theo bề rộng (không cố định px). Có thể truyền px hoặc bất kỳ CSS length.
-  height = "clamp(200px, 30vw, 300px)",
+  // tỉ lệ khung (rộng:cao). Chart cao theo bề rộng thật → responsive, không méo.
+  aspect = 2.6,
+  minHeight = 170,
+  maxHeight = 300,
 }: {
   nwSeries: number[];
   monthKeys: string[];
@@ -30,7 +34,9 @@ export function NetWorthChart({
   receivablesLandFirstMonth?: boolean;
   snapshots?: ForecastSnapshot[];
   showActual?: boolean;
-  height?: number | string;
+  aspect?: number;
+  minHeight?: number;
+  maxHeight?: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -48,9 +54,13 @@ export function NetWorthChart({
   const max = Math.max(...yVals) || min + 1;
   const X = (i: number) => 46 + (horizon > 0 ? (i / horizon) * (W - 54) : 0);
   const Y = (v: number) => H - 10 - ((v - min) / (max - min || 1)) * (H - 26);
+  // % dùng cho overlay HTML (khớp SVG stretch).
+  const xP = (i: number) => (X(i) / W) * 100;
+  const yP = (v: number) => (Y(v) / H) * 100;
   const line = nwSeries.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
   const area = `46,${H - 10} ${line} ${W},${H - 10}`;
   const tickIdx = [...new Set([0, Math.round(horizon / 3), Math.round((2 * horizon) / 3), horizon])];
+  const gridSteps = [0, 1 / 3, 2 / 3, 1];
 
   const showReceivables = receivablesLandFirstMonth && receivablesFirstMonth > 0 && horizon >= 1;
   const snapPoints = showActual
@@ -63,13 +73,14 @@ export function NetWorthChart({
     : [];
   const goalIdx = goalReachedAt ? monthKeys.indexOf(goalReachedAt) : -1;
 
-  const hoverLeftPct = hover != null ? (X(hover) / W) * 100 : 0;
+  const hoverLeftPct = hover != null ? xP(hover) : 0;
   const tipOnRight = hoverLeftPct > 58;
 
   return (
     <div
       ref={wrapRef}
-      className="relative"
+      className="relative w-full"
+      style={{ aspectRatio: `${aspect}`, minHeight, maxHeight }}
       onPointerMove={(e) => {
         const el = wrapRef.current;
         if (!el) return;
@@ -88,58 +99,33 @@ export function NetWorthChart({
       }}
       onPointerLeave={() => setHover(null)}
     >
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full">
         <defs>
           <filter id="nwglow" x="-4%" y="-20%" width="108%" height="140%">
             <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#17554A" floodOpacity="0.25" />
           </filter>
         </defs>
-        {[0, 1 / 3, 2 / 3, 1].map((t, i) => {
+        {gridSteps.map((t, i) => {
           const v = min + (max - min) * t;
           return (
-            <g key={i}>
-              <line x1={46} y1={Y(v)} x2={W} y2={Y(v)} stroke="#EFEAE0" strokeWidth={1} strokeDasharray={i === 0 ? "0" : "3 4"} vectorEffect="non-scaling-stroke" />
-              <text x={2} y={Y(v) + 3} fontSize={9} fill="#9AA49E" fontWeight={600}>
-                {fmt(v)}
-              </text>
-            </g>
+            <line key={i} x1={46} y1={Y(v)} x2={W} y2={Y(v)} stroke="#EFEAE0" strokeWidth={1} strokeDasharray={i === 0 ? "0" : "3 4"} vectorEffect="non-scaling-stroke" />
           );
         })}
         <polygon points={area} fill="#EAF4EE" />
 
         {/* Đường mục tiêu nhà */}
         {goalTarget > 0 && goalTarget >= min && goalTarget <= max && (
-          <>
-            <line x1={46} y1={Y(goalTarget)} x2={W} y2={Y(goalTarget)} stroke="#A5731F" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
-            <text x={W - 2} y={Y(goalTarget) - 4} fontSize={9} fill="#A5731F" fontWeight={700} textAnchor="end">
-              Mục tiêu
-            </text>
-          </>
+          <line x1={46} y1={Y(goalTarget)} x2={W} y2={Y(goalTarget)} stroke="#A5731F" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
         )}
 
         <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" filter="url(#nwglow)" />
 
-        {/* Receivables marker tháng 1 */}
-        {showReceivables && (
-          <g>
-            <circle cx={X(1)} cy={Y(nwSeries[1])} r={4.5} fill="#E8C97A" stroke="#FFFFFF" strokeWidth={2} />
-            <text x={X(1)} y={Y(nwSeries[1]) - 8} fontSize={8.5} fill="#A5731F" fontWeight={700} textAnchor="middle">
-              +{fmt(receivablesFirstMonth)} thu về
-            </text>
-          </g>
-        )}
+        {/* Receivables marker */}
+        {showReceivables && <circle cx={X(1)} cy={Y(nwSeries[1])} r={4.5} fill="#E8C97A" stroke="#FFFFFF" strokeWidth={2} />}
 
         {/* Snapshot overlay */}
         {snapPoints.map((p) => (
-          <circle
-            key={`snap${p.idx}`}
-            cx={X(p.idx)}
-            cy={Y(p.total)}
-            r={p.deviates ? 5 : 3.5}
-            fill={p.deviates ? "#B4573B" : "#8FBCA7"}
-            stroke="#FFFFFF"
-            strokeWidth={2}
-          >
+          <circle key={`snap${p.idx}`} cx={X(p.idx)} cy={Y(p.total)} r={p.deviates ? 5 : 3.5} fill={p.deviates ? "#B4573B" : "#8FBCA7"} stroke="#FFFFFF" strokeWidth={2}>
             <title>{`${p.monthKey} · thực tế ${full(p.total)}${p.deviates ? " (lệch >10% so với dự phóng)" : ""}`}</title>
           </circle>
         ))}
@@ -154,23 +140,47 @@ export function NetWorthChart({
         {tickIdx.map((i) => (
           <circle key={i} cx={X(i)} cy={Y(nwSeries[i])} r={3} fill="#17554A" stroke="#FFFFFF" strokeWidth={2} />
         ))}
-        {tickIdx.map((i) => (
-          <text key={`x${i}`} x={X(i)} y={H - 1} fontSize={9} fill="#9AA49E" fontWeight={600} textAnchor="middle">
-            {i === 0 ? "now" : monthKeys[i]}
-          </text>
-        ))}
 
         {hover != null && (
           <line x1={X(hover)} y1={10} x2={X(hover)} y2={H - 10} stroke="#B9C2BC" strokeWidth={1} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
         )}
       </svg>
 
+      {/* ---- CHỮ HTML overlay (sắc nét, cỡ cố định, không méo) ---- */}
+      {/* nhãn Y */}
+      {gridSteps.map((t, i) => {
+        const v = min + (max - min) * t;
+        return (
+          <div key={`y${i}`} className="absolute left-0 text-[10px] font-semibold text-faint tnum -translate-y-1/2 pointer-events-none" style={{ top: `${yP(v)}%` }}>
+            {fmt(v)}
+          </div>
+        );
+      })}
+      {/* nhãn X */}
+      {tickIdx.map((i) => (
+        <div key={`x${i}`} className="absolute bottom-0 text-[10px] font-semibold text-faint -translate-x-1/2 pointer-events-none" style={{ left: `${xP(i)}%` }}>
+          {i === 0 ? "now" : monthKeys[i]}
+        </div>
+      ))}
+      {/* nhãn "Mục tiêu" */}
+      {goalTarget > 0 && goalTarget >= min && goalTarget <= max && (
+        <div className="absolute right-1 text-[10px] font-bold text-[#A5731F] -translate-y-[130%] pointer-events-none" style={{ top: `${yP(goalTarget)}%` }}>
+          Mục tiêu
+        </div>
+      )}
+      {/* nhãn receivables */}
+      {showReceivables && (
+        <div className="absolute text-[10px] font-bold text-[#A5731F] -translate-x-1/2 -translate-y-[170%] whitespace-nowrap pointer-events-none" style={{ left: `${xP(1)}%`, top: `${yP(nwSeries[1])}%` }}>
+          +{fmt(receivablesFirstMonth)} thu về
+        </div>
+      )}
+
       {/* dot + tooltip HTML */}
       {hover != null && (
         <>
           <span
             className="absolute w-[10px] h-[10px] rounded-full border-2 border-white -translate-x-1/2 -translate-y-1/2 pointer-events-none bg-primary"
-            style={{ left: `${hoverLeftPct}%`, top: `${(Y(nwSeries[hover]) / H) * 100}%` }}
+            style={{ left: `${hoverLeftPct}%`, top: `${yP(nwSeries[hover])}%` }}
           />
           <div
             className="absolute top-2 z-20 pointer-events-none rounded-[12px] border border-card-border bg-white p-3"
