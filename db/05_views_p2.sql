@@ -51,7 +51,9 @@ select
   u.status,
   u.fx_rate,
   u.amount_vnd,
-  u.income_tx_id
+  u.income_tx_id,
+  u.billed_on,
+  u.received_on
 from upwork_contracts u;
 
 -- ---------- Projects: finance per project ------------------------------------

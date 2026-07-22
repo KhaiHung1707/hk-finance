@@ -10,6 +10,8 @@ import {
   createProject,
   updateProject,
   createMilestone,
+  updateMilestone,
+  deleteMilestone,
   billMilestone,
   collectMilestone,
   cancelMilestone,
@@ -70,6 +72,7 @@ export function ProjectsClient({
   const [edit, setEdit] = useState<EditState | null>(null);
   const [newMsName, setNewMsName] = useState("");
   const [newMsAmount, setNewMsAmount] = useState("");
+  const [msEdits, setMsEdits] = useState<Record<string, { name: string; amount: string }>>({});
   const [collect, setCollect] = useState<{ id: string; label: string; amountVnd: number } | null>(null);
   const [collectAccount, setCollectAccount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -237,6 +240,9 @@ export function ProjectsClient({
                             · {locked ? `@ ${new Intl.NumberFormat("en-US").format(m.fx_rate ?? 0)}` : "ước tính"}
                           </span>
                         )}
+                        {(m.received_on || m.billed_on) && (
+                          <span className="text-faint"> · {m.received_on ?? m.billed_on}</span>
+                        )}
                       </div>
                     </div>
                     {m.status === "draft" && (
@@ -343,6 +349,67 @@ export function ProjectsClient({
                   </Select>
                 </Field>
               </FieldRow>
+
+              {/* Milestone hiện có — sửa/xoá (chỉ draft) */}
+              {edit.id && (() => {
+                const proj = projects.find((pp) => pp.id === edit.id);
+                const ms = proj?.milestones ?? [];
+                if (ms.length === 0) return null;
+                return (
+                  <div className="border-t border-divider pt-3">
+                    <div className="text-[12px] font-semibold text-ink-soft mb-2">Milestone hiện có</div>
+                    <div className="flex flex-col gap-2">
+                      {ms.map((m) => (
+                        <div key={m.id} className="flex items-center gap-2">
+                          {m.status === "draft" ? (
+                            <>
+                              <TextInput
+                                value={msEdits[m.id]?.name ?? m.name}
+                                onChange={(e) => setMsEdits((s) => ({ ...s, [m.id]: { name: e.target.value, amount: s[m.id]?.amount ?? String(m.amount) } }))}
+                              />
+                              <TextInput
+                                type="number"
+                                value={msEdits[m.id]?.amount ?? String(m.amount)}
+                                onChange={(e) => setMsEdits((s) => ({ ...s, [m.id]: { name: s[m.id]?.name ?? m.name, amount: e.target.value } }))}
+                                className="max-w-[120px]"
+                              />
+                              <button
+                                onClick={async () => {
+                                  const e = msEdits[m.id];
+                                  await doAction(() => updateMilestone({ id: m.id, name: e?.name ?? m.name, amount: Number(e?.amount ?? m.amount) || 0 }));
+                                }}
+                                disabled={busy}
+                                className="text-primary text-[16px] px-1 disabled:opacity-50"
+                                title="Lưu"
+                              >
+                                <i className="ph-duotone ph-check-circle" aria-hidden />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (confirm(`Xoá milestone "${m.name}"?`)) doAction(() => deleteMilestone(m.id));
+                                }}
+                                disabled={busy}
+                                className="text-[#B4573B] text-[16px] px-1 disabled:opacity-50"
+                                title="Xoá"
+                              >
+                                <i className="ph-duotone ph-trash" aria-hidden />
+                              </button>
+                            </>
+                          ) : (
+                            <div className="flex items-center gap-2 flex-1 text-[12px] text-muted">
+                              <span className="flex-1">{m.name}</span>
+                              <span className="tnum">{ccy(m.amount, edit.currency)}</span>
+                              <span className="text-[10px] font-bold rounded-full px-[8px] py-[2px] bg-fill-soft">
+                                {m.status === "received" ? "Đã thu" : m.status === "billed" ? "Đã bill" : "Đã huỷ"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Add milestone (chỉ khi project đã tồn tại) */}
               {edit.id && (

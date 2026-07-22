@@ -179,6 +179,7 @@ create table if not exists milestones (
   amount_vnd   bigint,                  -- freeze khi bill
   income_tx_id uuid references transactions(id),
   billed_on    date,
+  received_on  date,
   note         text,
   sort         int default 0
 );
@@ -197,6 +198,8 @@ create table if not exists upwork_contracts (
   fx_rate       numeric,                -- khoá khi bill
   amount_vnd    bigint,
   income_tx_id  uuid references transactions(id),
+  billed_on     date,
+  received_on   date,
   note          text
 );
 

@@ -156,7 +156,8 @@ begin
   returning id into v_tx;
 
   update upwork_contracts
-    set status = 'billed', fx_rate = v_fx, amount_vnd = v_net_vnd, income_tx_id = v_tx
+    set status = 'billed', fx_rate = v_fx, amount_vnd = v_net_vnd, income_tx_id = v_tx,
+        billed_on = current_date
   where id = p_id;
   return v_tx;
 end $$;
@@ -241,6 +242,29 @@ begin
   values (p_project_id, p_name, p_amount, 'draft', p_sort)
   returning id into v_id;
   return v_id;
+end $$;
+
+-- update_milestone: sửa tên/amount — CHỈ khi còn draft (billed/received đã vào ledger).
+create or replace function update_milestone(p_id uuid, p_name text, p_amount numeric)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  if p_amount is null or p_amount <= 0 then raise exception 'update_milestone: amount phải > 0'; end if;
+  select status into v_status from milestones where id = p_id for update;
+  if not found then raise exception 'update_milestone: milestone không tồn tại'; end if;
+  if v_status <> 'draft' then raise exception 'update_milestone: chỉ sửa được milestone draft'; end if;
+  update milestones set name = p_name, amount = p_amount where id = p_id;
+end $$;
+
+-- delete_milestone: xoá — CHỈ khi còn draft (chưa tạo tx nào).
+create or replace function delete_milestone(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  select status into v_status from milestones where id = p_id for update;
+  if not found then raise exception 'delete_milestone: milestone không tồn tại'; end if;
+  if v_status <> 'draft' then raise exception 'delete_milestone: chỉ xoá được milestone draft'; end if;
+  delete from milestones where id = p_id;
 end $$;
 
 -- bill_milestone: khoá fx, freeze amount_vnd, tạo pending income tx cho project.

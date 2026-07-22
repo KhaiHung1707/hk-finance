@@ -127,9 +127,9 @@ begin
 
   -- Đồng bộ trạng thái module gốc (RPC duy trì cả hai chiều — audit fix #3).
   if v_ref_table = 'milestones' then
-    update milestones set status = 'received' where id = v_ref_id;
+    update milestones set status = 'received', received_on = current_date where id = v_ref_id;
   elsif v_ref_table = 'upwork_contracts' then
-    update upwork_contracts set status = 'received' where id = v_ref_id;
+    update upwork_contracts set status = 'received', received_on = current_date where id = v_ref_id;
   elsif v_ref_table = 'print_orders' then
     update print_orders set status = 'received' where id = v_ref_id;
   end if;

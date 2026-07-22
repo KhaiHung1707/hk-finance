@@ -7,6 +7,8 @@ export type Milestone = {
   status: "draft" | "billed" | "received" | "cancelled";
   amount_vnd: number | null;
   fx_rate: number | null;
+  billed_on: string | null;
+  received_on: string | null;
   sort: number;
 };
 
@@ -45,6 +47,8 @@ export async function getProjects(): Promise<ProjectFinance[]> {
       status: m.status,
       amount_vnd: m.amount_vnd === null ? null : Number(m.amount_vnd),
       fx_rate: m.fx_rate === null ? null : Number(m.fx_rate),
+      billed_on: m.billed_on ?? null,
+      received_on: m.received_on ?? null,
       sort: m.sort ?? 0,
     });
     byProject.set(m.project_id, arr);

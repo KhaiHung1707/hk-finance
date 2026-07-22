@@ -91,6 +91,26 @@ export async function createMilestone(input: {
   });
 }
 
+export async function updateMilestone(input: { id: string; name: string; amount: number }) {
+  return guard(async () => {
+    const name = nonEmpty(input.name, "name");
+    const amount = positive(input.amount, "amount");
+    const sb = await createClient();
+    const { error } = await sb.rpc("update_milestone", { p_id: input.id, p_name: name, p_amount: amount });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
+}
+
+export async function deleteMilestone(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_milestone", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
 export async function billMilestone(id: string, monthKey: string) {
   const sb = await createClient();
   const { error } = await sb.rpc("bill_milestone", { p_id: id, p_month_key: monthKey });

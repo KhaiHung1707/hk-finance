@@ -160,6 +160,7 @@ export function UpworkClient({
                     {fmt(netVnd)}
                     <div className="text-[10px] text-faint">
                       {locked ? `@ ${new Intl.NumberFormat("en-US").format(c.fx_rate ?? 0)}` : "ước tính"}
+                      {(c.received_on || c.billed_on) && ` · ${c.received_on ?? c.billed_on}`}
                     </div>
                   </>
                 )}
