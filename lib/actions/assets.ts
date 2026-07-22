@@ -47,6 +47,32 @@ export async function sellGoldLot(lotId: string, soldPrice: number, accountId: s
   });
 }
 
+export async function updateGoldLot(input: {
+  id: string;
+  quantity: number;
+  unitCost: number;
+  purchasedOn?: string | null;
+}) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("update_gold_lot", {
+    p_id: input.id,
+    p_quantity: input.quantity,
+    p_unit_cost: Math.round(input.unitCost),
+    p_purchased_on: input.purchasedOn || null,
+  });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
+export async function deleteGoldLot(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_gold_lot", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
 export async function updatePrice(assetKey: string, price: number) {
   return guard(async () => {
     const p = positive(price, "price");

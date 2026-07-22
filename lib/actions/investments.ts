@@ -69,6 +69,49 @@ export async function settleDeposit(input: {
   });
 }
 
+export async function updateDeposit(input: {
+  id: string;
+  name: string;
+  principal: number;
+  rate: number; // thập phân
+  termMonths: number;
+  start: string;
+}) {
+  return guard(async () => {
+    const name = nonEmpty(input.name, "name");
+    const principal = positive(input.principal, "Gốc");
+    const term = positiveInt(input.termMonths, "Kỳ hạn");
+    const sb = await createClient();
+    const { error } = await sb.rpc("update_deposit", {
+      p_id: input.id,
+      p_name: name,
+      p_principal: Math.round(principal),
+      p_rate: input.rate,
+      p_term_months: term,
+      p_start: input.start,
+    });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
+}
+
+export async function updateStockTrade(input: { id: string; qty: number; price: number }) {
+  return guard(async () => {
+    const qty = positive(input.qty, "Số lượng");
+    const price = positive(input.price, "Giá");
+    const sb = await createClient();
+    const { error } = await sb.rpc("update_stock_trade", {
+      p_id: input.id,
+      p_qty: qty,
+      p_price: Math.round(price),
+    });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
+}
+
 export async function buyStock(input: {
   ticker: string;
   qty: number;

@@ -362,6 +362,93 @@ begin
 end $$;
 
 -- =============================================================================
+-- EDIT RPC (sửa bản ghi chưa chốt vào ledger). Chạm tx nếu cần để giữ số liệu đúng.
+-- =============================================================================
+
+-- update_gold_lot: sửa lô CHỈ khi 'held'. Nếu lô có purchase_tx (không pre-app) thì
+-- đồng bộ lại số tiền tx mua = quantity × unit_cost.
+create or replace function update_gold_lot(
+  p_id uuid, p_quantity numeric, p_unit_cost bigint, p_purchased_on date default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_status text; v_tx uuid; v_total bigint;
+begin
+  if p_quantity is null or p_quantity <= 0 then raise exception 'update_gold_lot: quantity phải > 0'; end if;
+  if p_unit_cost is null or p_unit_cost <= 0 then raise exception 'update_gold_lot: unit_cost phải > 0'; end if;
+  select status, purchase_tx_id into v_status, v_tx from gold_lots where id = p_id for update;
+  if not found then raise exception 'update_gold_lot: lô không tồn tại'; end if;
+  if v_status <> 'held' then raise exception 'update_gold_lot: chỉ sửa được lô chưa bán'; end if;
+
+  update gold_lots set quantity = p_quantity, unit_cost = p_unit_cost,
+    purchased_on = coalesce(p_purchased_on, purchased_on) where id = p_id;
+
+  if v_tx is not null then
+    v_total := (p_quantity * p_unit_cost)::bigint;
+    update transactions set amount = v_total,
+      note = 'Mua vàng ' || p_quantity || ' chỉ' where id = v_tx;
+  end if;
+end $$;
+
+-- delete_gold_lot: xoá lô CHỈ khi 'held'. Nếu có tx mua thì huỷ tx đó (đảo số dư).
+create or replace function delete_gold_lot(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text; v_tx uuid;
+begin
+  select status, purchase_tx_id into v_status, v_tx from gold_lots where id = p_id for update;
+  if not found then raise exception 'delete_gold_lot: lô không tồn tại'; end if;
+  if v_status <> 'held' then raise exception 'delete_gold_lot: chỉ xoá được lô chưa bán'; end if;
+  if v_tx is not null then update transactions set status = 'cancelled' where id = v_tx; end if;
+  delete from gold_lots where id = p_id;
+end $$;
+
+-- update_deposit: sửa sổ CHỈ khi 'active'. Nếu sổ có source_account (không pre-app),
+-- đồng bộ số tiền tx mở sổ = principal mới. Tính lại maturity theo start + term.
+create or replace function update_deposit(
+  p_id uuid, p_name text, p_principal bigint, p_rate numeric, p_term_months int, p_start date
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_status text; v_src uuid; v_open_tx uuid; v_maturity date;
+begin
+  if p_principal is null or p_principal <= 0 then raise exception 'update_deposit: principal phải > 0'; end if;
+  if p_rate is null or p_rate < 0 or p_rate > 1 then raise exception 'update_deposit: rate trong [0,1]'; end if;
+  if p_term_months is null or p_term_months <= 0 then raise exception 'update_deposit: term phải > 0'; end if;
+  select status, source_account_id into v_status, v_src from term_deposits where id = p_id for update;
+  if not found then raise exception 'update_deposit: sổ không tồn tại'; end if;
+  if v_status <> 'active' then raise exception 'update_deposit: chỉ sửa được sổ active'; end if;
+
+  v_maturity := (p_start + (p_term_months || ' months')::interval)::date;
+  update term_deposits set name = p_name, principal = p_principal, annual_rate = p_rate,
+    term_months = p_term_months, start_on = p_start, maturity_on = v_maturity where id = p_id;
+
+  -- đồng bộ tx mở sổ (expense danh mục Đầu tư ref = sổ này) nếu có
+  if v_src is not null then
+    update transactions set amount = p_principal, note = 'Mở sổ tiết kiệm — ' || p_name
+    where ref_table = 'term_deposits' and ref_id = p_id and type = 'expense' and status <> 'cancelled';
+  end if;
+end $$;
+
+-- update_stock_trade: sửa qty/price của 1 trade. Đồng bộ lại số tiền tx (buy=expense,
+-- sell=income) = qty × price. Position tự tính lại từ stock_trades.
+create or replace function update_stock_trade(p_id uuid, p_qty numeric, p_price bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_tx uuid; v_side text; v_ticker text; v_total bigint;
+begin
+  if p_qty is null or p_qty <= 0 then raise exception 'update_stock_trade: qty phải > 0'; end if;
+  if p_price is null or p_price <= 0 then raise exception 'update_stock_trade: price phải > 0'; end if;
+  select tx_id, side, ticker into v_tx, v_side, v_ticker from stock_trades where id = p_id for update;
+  if not found then raise exception 'update_stock_trade: trade không tồn tại'; end if;
+
+  update stock_trades set qty = p_qty, unit_price = p_price where id = p_id;
+
+  if v_tx is not null then
+    v_total := (p_qty * p_price)::bigint;
+    update transactions set amount = v_total,
+      note = (case when v_side='buy' then 'Mua ' else 'Bán ' end) || p_qty || ' ' || v_ticker || ' @ ' || p_price
+    where id = v_tx and status <> 'cancelled';
+  end if;
+end $$;
+
+-- =============================================================================
 -- FUNCTION PRIVILEGES (chạy CUỐI CÙNG — sau khi mọi RPC P1/P2/P3 đã tạo).
 -- Mọi RPC là security definer; Postgres/Supabase mặc định GRANT execute cho
 -- `public`. Nếu không revoke, `anon` (chưa đăng nhập) gọi thẳng RPC ghi tiền,

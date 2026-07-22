@@ -43,6 +43,38 @@ export async function createContract(input: {
   });
 }
 
+export async function updateContract(input: {
+  id: string;
+  client: string;
+  job: string;
+  contractType: "fixed" | "hourly";
+  amountUsd: number | null;
+  feePct: number | null;
+}) {
+  return guard(async () => {
+    const client = nonEmpty(input.client, "client");
+    const amountUsd = input.amountUsd == null ? null : nonNegative(input.amountUsd, "amount_usd");
+    let feePct: number | null = null;
+    if (input.feePct != null) {
+      const f = Number(input.feePct);
+      if (!Number.isFinite(f) || f < 0 || f > 1) return { ok: false, error: "fee_pct phải trong khoảng 0–1" };
+      feePct = f;
+    }
+    const sb = await createClient();
+    const { error } = await sb.rpc("update_contract", {
+      p_id: input.id,
+      p_client: client,
+      p_job: input.job || null,
+      p_contract_type: input.contractType,
+      p_amount_usd: amountUsd,
+      p_fee_pct: feePct,
+    });
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
+}
+
 export async function activateContract(id: string) {
   const sb = await createClient();
   const { error } = await sb.rpc("activate_contract", { p_id: id });

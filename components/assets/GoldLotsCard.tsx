@@ -5,7 +5,7 @@ import { fmt, full, chi } from "@/lib/format";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
-import { sellGoldLot } from "@/lib/actions/assets";
+import { sellGoldLot, updateGoldLot, deleteGoldLot } from "@/lib/actions/assets";
 import type { GoldLot } from "@/lib/queries/assets";
 import type { Ref } from "@/lib/queries";
 
@@ -27,6 +27,40 @@ export function GoldLotsCard({
   const [account, setAccount] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // edit lô
+  const [edit, setEdit] = useState<GoldLot | null>(null);
+  const [eQty, setEQty] = useState("");
+  const [eCost, setECost] = useState("");
+  const [eDate, setEDate] = useState("");
+  function openEdit(l: GoldLot) {
+    setEdit(l);
+    setEQty(String(l.quantity));
+    setECost(String(l.unit_cost));
+    setEDate(l.purchased_on ?? "");
+    setErr(null);
+  }
+  async function saveEdit() {
+    if (!edit) return;
+    setBusy(true);
+    setErr(null);
+    const res = await updateGoldLot({
+      id: edit.id,
+      quantity: Number(eQty) || 0,
+      unitCost: Number(eCost) || 0,
+      purchasedOn: eDate || null,
+    });
+    setBusy(false);
+    if (!res.ok) return setErr(res.error ?? "Lỗi");
+    setEdit(null);
+    router.refresh();
+  }
+  async function removeLot(l: GoldLot) {
+    if (!confirm(`Xoá lô vàng ${chi(l.quantity)}?`)) return;
+    const res = await deleteGoldLot(l.id);
+    if (!res.ok) return alert(res.error);
+    router.refresh();
+  }
 
   function openSell(l: GoldLot) {
     setSell(l);
@@ -105,7 +139,25 @@ export function GoldLotsCard({
                   {up ? "+" : "−"}
                   {fmt(Math.abs(l.unrealized))}
                 </div>
-                <div className="text-right">
+                <div className="flex justify-end gap-1">
+                  <button
+                    onClick={() => openEdit(l)}
+                    disabled={busy}
+                    aria-label="Sửa lô"
+                    title="Sửa"
+                    className="text-muted hover:text-primary text-[14px] w-[26px] h-[26px] flex items-center justify-center disabled:opacity-50"
+                  >
+                    <i className="ph-duotone ph-pencil-simple" aria-hidden />
+                  </button>
+                  <button
+                    onClick={() => removeLot(l)}
+                    disabled={busy}
+                    aria-label="Xoá lô"
+                    title="Xoá"
+                    className="text-muted hover:text-[#B4573B] text-[14px] w-[26px] h-[26px] flex items-center justify-center disabled:opacity-50"
+                  >
+                    <i className="ph-duotone ph-trash" aria-hidden />
+                  </button>
                   <button
                     onClick={() => openSell(l)}
                     className="bg-[#F7E3DC] text-[#B4573B] border-0 rounded-full px-[13px] py-[6px] text-[11px] font-bold cursor-pointer hover:bg-[#F0D2C6]"
@@ -160,6 +212,39 @@ export function GoldLotsCard({
               </Button>
               <Button variant="primary" className="flex-1" onClick={submit} disabled={busy || !account || soldPrice <= 0}>
                 {busy ? "…" : "Bán & ghi Ledger"}
+              </Button>
+            </ModalActions>
+          </>
+        )}
+      </Modal>
+
+      {/* Modal sửa lô */}
+      <Modal open={edit !== null} onClose={() => setEdit(null)} title="Sửa lô vàng" icon="ph-duotone ph-pencil-simple" width={440}>
+        {edit && (
+          <>
+            <div className="flex flex-col gap-[14px]">
+              <FieldRow>
+                <Field label="Số lượng (chỉ)">
+                  <TextInput type="number" value={eQty} onChange={(e) => setEQty(e.target.value)} autoFocus />
+                </Field>
+                <Field label="Giá vốn / chỉ (₫)">
+                  <TextInput type="number" value={eCost} onChange={(e) => setECost(e.target.value)} />
+                </Field>
+              </FieldRow>
+              <Field label="Ngày mua">
+                <TextInput type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} />
+              </Field>
+              <div className="text-[11px] text-muted">
+                Nếu lô có giao dịch mua, số tiền giao dịch sẽ được cập nhật theo.
+              </div>
+              {err && <div className="text-[12px] text-[#B4573B] font-semibold">{err}</div>}
+            </div>
+            <ModalActions>
+              <Button variant="ghost" className="flex-1" onClick={() => setEdit(null)}>
+                Huỷ
+              </Button>
+              <Button variant="primary" className="flex-1" onClick={saveEdit} disabled={busy || !(Number(eQty) > 0) || !(Number(eCost) > 0)}>
+                {busy ? "…" : "Lưu"}
               </Button>
             </ModalActions>
           </>

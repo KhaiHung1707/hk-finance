@@ -201,6 +201,30 @@ begin
   return v_id;
 end $$;
 
+-- update_contract: sửa CHỈ khi draft/active (chưa bill → chưa khoá fx/amount_vnd).
+create or replace function update_contract(
+  p_id uuid, p_client text, p_job text, p_contract_type text,
+  p_amount_usd numeric default null, p_fee_pct numeric default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  if p_amount_usd is not null and p_amount_usd < 0 then
+    raise exception 'update_contract: amount_usd không được âm';
+  end if;
+  if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 1) then
+    raise exception 'update_contract: fee_pct phải trong [0,1]';
+  end if;
+  select status into v_status from upwork_contracts where id = p_id for update;
+  if not found then raise exception 'update_contract: hợp đồng không tồn tại'; end if;
+  if v_status not in ('draft','active') then
+    raise exception 'update_contract: chỉ sửa được hợp đồng draft/active';
+  end if;
+  update upwork_contracts set client = p_client, job = p_job,
+    contract_type = coalesce(p_contract_type,'fixed'),
+    amount_usd = p_amount_usd, fee_pct = p_fee_pct where id = p_id;
+end $$;
+
 -- =============================================================================
 -- PROJECTS & MILESTONES
 -- =============================================================================

@@ -9,10 +9,12 @@ import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import {
   openDeposit,
+  updateDeposit,
   settleDeposit,
   buyStock,
   sellStock,
   recordDividend,
+  updateStockTrade,
 } from "@/lib/actions/investments";
 import { updatePrice } from "@/lib/actions/assets";
 import type { DepositPosition, StockPosition, StockHistoryRow } from "@/lib/queries/investments";
@@ -25,10 +27,12 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 
 type ModalKind =
   | { kind: "deposit" }
+  | { kind: "editDeposit"; dep: DepositPosition }
   | { kind: "settle"; dep: DepositPosition }
   | { kind: "buy" }
   | { kind: "sell"; pos: StockPosition }
   | { kind: "dividend"; pos: StockPosition }
+  | { kind: "editTrade"; row: StockHistoryRow }
   | null;
 
 export function InvestmentsClient({
@@ -66,7 +70,18 @@ export function InvestmentsClient({
     setF((s) => ({ ...s, [k]: e.target.value }));
 
   function open(m: ModalKind) {
-    setF(m?.kind === "settle" ? { settleOn: todayISO() } : {});
+    if (m?.kind === "settle") setF({ settleOn: todayISO() });
+    else if (m?.kind === "editDeposit")
+      setF({
+        name: m.dep.name,
+        principal: String(m.dep.principal),
+        rate: String(m.dep.annual_rate * 100),
+        months: String(m.dep.term_months),
+        start: m.dep.start_on,
+      });
+    else if (m?.kind === "editTrade")
+      setF({ qty: String(m.row.qty ?? ""), price: String(m.row.unit_price ?? "") });
+    else setF({});
     setPreApp(false);
     setErr(null);
     setModal(m);
@@ -169,7 +184,12 @@ export function InvestmentsClient({
               )}
 
               {active.map((d) => (
-                <DepositRow key={d.id} d={d} onSettle={() => open({ kind: "settle", dep: d })} />
+                <DepositRow
+                  key={d.id}
+                  d={d}
+                  onSettle={() => open({ kind: "settle", dep: d })}
+                  onEdit={() => open({ kind: "editDeposit", dep: d })}
+                />
               ))}
 
               {/* Đã tất toán — collapsed */}
@@ -318,8 +338,8 @@ export function InvestmentsClient({
                             <div className="text-[12px] text-muted">Không có giao dịch.</div>
                           ) : (
                             <div className="flex flex-col gap-1">
-                              {rows.map((h, i) => (
-                                <div key={i} className="flex items-center gap-3 text-[12px]">
+                              {rows.map((h) => (
+                                <div key={h.id} className="flex items-center gap-3 text-[12px]">
                                   <span
                                     className="rounded-full px-2 py-[2px] text-[10px] font-bold"
                                     style={{
@@ -338,6 +358,16 @@ export function InvestmentsClient({
                                   <span className="ml-auto font-semibold tnum" title={full(h.amount)}>
                                     {fmt(h.amount)}
                                   </span>
+                                  {h.kind !== "dividend" && (
+                                    <button
+                                      onClick={() => open({ kind: "editTrade", row: h })}
+                                      aria-label="Sửa giao dịch"
+                                      title="Sửa số lượng / giá"
+                                      className="text-muted hover:text-primary text-[13px]"
+                                    >
+                                      <i className="ph-duotone ph-pencil-simple" aria-hidden />
+                                    </button>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -610,6 +640,106 @@ export function InvestmentsClient({
           </>
         )}
       </Modal>
+
+      {/* Sửa sổ tiết kiệm (active) */}
+      <Modal open={modal?.kind === "editDeposit"} onClose={close} title="Sửa sổ tiết kiệm" icon="ph-duotone ph-pencil-simple" width={480}>
+        {modal?.kind === "editDeposit" && (
+          <>
+            <div className="flex flex-col gap-[14px]">
+              <Field label="Tên sổ">
+                <TextInput value={f.name ?? ""} onChange={set("name")} />
+              </Field>
+              <FieldRow>
+                <Field label="Gốc (₫)">
+                  <TextInput type="number" value={f.principal ?? ""} onChange={set("principal")} />
+                </Field>
+                <Field label="Lãi suất (%/năm)">
+                  <TextInput type="number" value={f.rate ?? ""} onChange={set("rate")} />
+                </Field>
+              </FieldRow>
+              <FieldRow>
+                <Field label="Kỳ hạn (tháng)">
+                  <TextInput type="number" value={f.months ?? ""} onChange={set("months")} />
+                </Field>
+                <Field label="Ngày mở">
+                  <TextInput type="date" value={f.start ?? ""} onChange={set("start")} />
+                </Field>
+              </FieldRow>
+              {err && <div className="text-[12px] text-[#B4573B] font-semibold">{err}</div>}
+            </div>
+            <ModalActions>
+              <Button variant="ghost" className="flex-1" onClick={close}>
+                Huỷ
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={busy || !f.name || !(Number(f.principal) > 0)}
+                onClick={() =>
+                  run(() =>
+                    updateDeposit({
+                      id: modal.dep.id,
+                      name: f.name ?? "",
+                      principal: Math.round(Number(f.principal) || 0),
+                      rate: (Number(f.rate) || 0) / 100,
+                      termMonths: Number(f.months) || 1,
+                      start: f.start || todayISO(),
+                    })
+                  )
+                }
+              >
+                {busy ? "…" : "Lưu"}
+              </Button>
+            </ModalActions>
+          </>
+        )}
+      </Modal>
+
+      {/* Sửa giao dịch cổ phiếu */}
+      <Modal open={modal?.kind === "editTrade"} onClose={close} title="Sửa giao dịch" icon="ph-duotone ph-pencil-simple" width={420}>
+        {modal?.kind === "editTrade" && (
+          <>
+            <div className="text-[13px] text-ink-soft mb-4">
+              {modal.row.kind === "buy" ? "Mua" : "Bán"} {modal.row.ticker} · {modal.row.on}
+            </div>
+            <div className="flex flex-col gap-[14px]">
+              <FieldRow>
+                <Field label="Số lượng">
+                  <TextInput type="number" value={f.qty ?? ""} onChange={set("qty")} autoFocus />
+                </Field>
+                <Field label="Giá / cp (₫)">
+                  <TextInput type="number" value={f.price ?? ""} onChange={set("price")} />
+                </Field>
+              </FieldRow>
+              <div className="text-[11px] text-muted">
+                Số tiền giao dịch sẽ được cập nhật = số lượng × giá. Vị thế tự tính lại.
+              </div>
+              {err && <div className="text-[12px] text-[#B4573B] font-semibold">{err}</div>}
+            </div>
+            <ModalActions>
+              <Button variant="ghost" className="flex-1" onClick={close}>
+                Huỷ
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-1"
+                disabled={busy || !(Number(f.qty) > 0) || !(Number(f.price) > 0)}
+                onClick={() =>
+                  run(() =>
+                    updateStockTrade({
+                      id: modal.row.id,
+                      qty: Number(f.qty) || 0,
+                      price: Math.round(Number(f.price) || 0),
+                    })
+                  )
+                }
+              >
+                {busy ? "…" : "Lưu"}
+              </Button>
+            </ModalActions>
+          </>
+        )}
+      </Modal>
     </>
   );
 }
@@ -619,10 +749,12 @@ export function InvestmentsClient({
 function DepositRow({
   d,
   onSettle,
+  onEdit,
   settledView,
 }: {
   d: DepositPosition;
   onSettle?: () => void;
+  onEdit?: () => void;
   settledView?: boolean;
 }) {
   const st =
@@ -668,14 +800,24 @@ function DepositRow({
           {st.label}
         </Badge>
       </div>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-1">
         {d.status === "active" ? (
-          <button
-            onClick={onSettle}
-            className="bg-primary text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
-          >
-            Tất toán
-          </button>
+          <>
+            <button
+              onClick={onEdit}
+              aria-label="Sửa sổ"
+              title="Sửa"
+              className="text-muted hover:text-primary text-[14px] w-[28px] h-[28px] flex items-center justify-center"
+            >
+              <i className="ph-duotone ph-pencil-simple" aria-hidden />
+            </button>
+            <button
+              onClick={onSettle}
+              className="bg-primary text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
+            >
+              Tất toán
+            </button>
+          </>
         ) : (
           <span className="flex items-center gap-[5px] text-muted text-[11px] font-bold">
             <i className="ph-duotone ph-check" aria-hidden />

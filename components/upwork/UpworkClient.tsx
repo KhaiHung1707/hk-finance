@@ -6,7 +6,7 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
-import { createContract, activateContract, billContract, receiveContract, cancelContract } from "@/lib/actions/upwork";
+import { createContract, updateContract, activateContract, billContract, receiveContract, cancelContract } from "@/lib/actions/upwork";
 import type { UpworkContract } from "@/lib/queries/upwork";
 import type { Ref } from "@/lib/queries";
 
@@ -39,6 +39,7 @@ export function UpworkClient({
   const [receiveId, setReceiveId] = useState<string | null>(null);
   const [receiveAccount, setReceiveAccount] = useState("");
 
+  const [editId, setEditId] = useState<string | null>(null);
   const [client, setClient] = useState("");
   const [job, setJob] = useState("");
   const [kind, setKind] = useState<"fixed" | "hourly">("fixed");
@@ -49,17 +50,23 @@ export function UpworkClient({
   const g = Number(gross) || 0;
   const previewNet = g * (1 - feePctDefault);
 
+  function openEdit(c: (typeof contracts)[number]) {
+    setEditId(c.id);
+    setClient(c.client);
+    setJob(c.job ?? "");
+    setKind(c.contract_type);
+    setGross(c.amount_usd != null ? String(c.amount_usd) : "");
+    setErr(null);
+    setModal(true);
+  }
+
   async function submit() {
     setBusy(true);
     setErr(null);
     if (!client) return fail("Nhập client");
-    const res = await createContract({
-      client,
-      job,
-      contractType: kind,
-      amountUsd: g || null,
-      feePct: null,
-    });
+    const res = editId
+      ? await updateContract({ id: editId, client, job, contractType: kind, amountUsd: g || null, feePct: null })
+      : await createContract({ client, job, contractType: kind, amountUsd: g || null, feePct: null });
     if (!res.ok) return fail(res.error ?? "Lỗi");
     reset();
     setModal(false);
@@ -67,6 +74,7 @@ export function UpworkClient({
   }
 
   function reset() {
+    setEditId(null);
     setClient("");
     setJob("");
     setKind("fixed");
@@ -90,7 +98,10 @@ export function UpworkClient({
     <>
       <HeaderPortal>
         <button
-          onClick={() => setModal(true)}
+          onClick={() => {
+            reset();
+            setModal(true);
+          }}
           className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
         >
           <i className="ph-duotone ph-plus-circle" aria-hidden />
@@ -171,6 +182,17 @@ export function UpworkClient({
                 </Badge>
               </div>
               <div className="flex justify-end gap-[6px]">
+                {(c.status === "draft" || c.status === "active") && (
+                  <button
+                    onClick={() => openEdit(c)}
+                    disabled={busy}
+                    aria-label="Sửa hợp đồng"
+                    title="Sửa"
+                    className="bg-transparent text-muted border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-chip hover:text-primary disabled:opacity-50"
+                  >
+                    <i className="ph-duotone ph-pencil-simple" aria-hidden />
+                  </button>
+                )}
                 {c.status === "draft" && (
                   <button
                     onClick={() => doAction(() => activateContract(c.id))}
@@ -230,7 +252,7 @@ export function UpworkClient({
           reset();
           setModal(false);
         }}
-        title="New contract"
+        title={editId ? "Sửa hợp đồng" : "New contract"}
         icon="ph-duotone ph-globe"
       >
         <div className="flex flex-col gap-[14px]">
@@ -269,7 +291,7 @@ export function UpworkClient({
             Huỷ
           </Button>
           <Button variant="primary" className="flex-1" onClick={submit} disabled={busy}>
-            {busy ? "Đang lưu…" : "Add contract (draft)"}
+            {busy ? "Đang lưu…" : editId ? "Lưu thay đổi" : "Add contract (draft)"}
           </Button>
         </ModalActions>
       </Modal>

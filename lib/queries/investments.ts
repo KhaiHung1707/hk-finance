@@ -57,6 +57,7 @@ export async function getStockPositions(): Promise<StockPosition[]> {
 }
 
 export type StockHistoryRow = {
+  id: string; // stock_trades.id (dividend: dividends.id) — cho edit
   ticker: string;
   kind: "buy" | "sell" | "dividend";
   qty: number | null;
@@ -69,12 +70,13 @@ export type StockHistoryRow = {
 export async function getStockHistory(): Promise<Record<string, StockHistoryRow[]>> {
   const sb = await createClient();
   const [{ data: trades }, { data: divs }] = await Promise.all([
-    sb.from("stock_trades").select("ticker, side, qty, unit_price, traded_on").order("traded_on"),
-    sb.from("dividends").select("ticker, amount, month_key").order("month_key"),
+    sb.from("stock_trades").select("id, ticker, side, qty, unit_price, traded_on").order("traded_on"),
+    sb.from("dividends").select("id, ticker, amount, month_key").order("month_key"),
   ]);
   const out: Record<string, StockHistoryRow[]> = {};
   for (const t of trades ?? []) {
     (out[t.ticker] ??= []).push({
+      id: t.id,
       ticker: t.ticker,
       kind: t.side as "buy" | "sell",
       qty: Number(t.qty),
@@ -85,6 +87,7 @@ export async function getStockHistory(): Promise<Record<string, StockHistoryRow[
   }
   for (const d of divs ?? []) {
     (out[d.ticker] ??= []).push({
+      id: d.id,
       ticker: d.ticker,
       kind: "dividend",
       qty: null,
