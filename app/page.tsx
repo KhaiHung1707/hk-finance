@@ -38,7 +38,7 @@ export default async function DashboardPage() {
     await Promise.all([
       getAccountBalances(),
       getMonthlySummary(monthKey),
-      getReceivables(monthKey),
+      getReceivables(), // MỌI tháng + mọi nguồn
       getNetWorth(),
       getAllocation(),
       getProfile(),
@@ -61,7 +61,8 @@ export default async function DashboardPage() {
     goalMonth = hit ? hit.monthKey : fc.months.length ? `sau ${fc.monthKeys[fc.monthKeys.length - 1]}` : null;
   }
   const receivedT = summary?.received ?? 0;
-  const pendingT = summary?.pending ?? 0;
+  const pendingT = summary?.pending ?? 0; // pending của tháng đang xem (MonthTile)
+  const receivablesTotal = receivables.reduce((s, r) => s + r.amount, 0); // mọi tháng/nguồn
   const expenseT = summary?.expense ?? 0;
   const totalAccounts = balances.reduce((s, a) => s + a.balance, 0);
 
@@ -92,9 +93,9 @@ export default async function DashboardPage() {
           icon="ph-duotone ph-hourglass-medium"
           iconBg="#FBF0DC"
           iconFg="#A5731F"
-          delta={{ text: `${receivables.length} items`, bg: "#FBF0DC", fg: "#A5731F" }}
-          value={<MoneyText value={pendingT} hint={`${full(pendingT)} · ${receivables.length} khoản chờ thu`} />}
-          label="Pending"
+          delta={{ text: `${receivables.length} khoản`, bg: "#FBF0DC", fg: "#A5731F" }}
+          value={<MoneyText value={receivablesTotal} hint={`${full(receivablesTotal)} · ${receivables.length} khoản chờ thu (mọi nguồn)`} />}
+          label="Chờ thu"
         />
         <StatCard
           icon="ph-duotone ph-arrow-circle-up"
@@ -120,7 +121,7 @@ export default async function DashboardPage() {
 
       {/* Row 1: Receivables · Accounts · Allocation */}
       <div className="grid gap-[14px] items-stretch" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))" }}>
-        <ReceivablesCard items={receivables} total={pendingT} accounts={accountsRef} />
+        <ReceivablesCard items={receivables} total={receivablesTotal} accounts={accountsRef} />
 
         {/* Account balances */}
         <div className="bg-card border border-card-border rounded-[18px] p-[22px] flex flex-col">

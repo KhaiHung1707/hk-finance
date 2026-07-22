@@ -39,6 +39,8 @@ export type ReceivableItem = {
   month_key: string;
   note: string | null;
   source: string | null;
+  module: string; // nhóm nguồn: Upwork | Projects | In3D | Khác
+  ref_label: string | null; // tên hiển thị của bản ghi module gốc
 };
 
 export type NetWorth = {
@@ -100,13 +102,25 @@ export async function getRecognizedBySource(
   return (data ?? []).map((r) => ({ ...r, recognized: Number(r.recognized) }));
 }
 
+/**
+ * Khoản chờ thu. KHÔNG lọc tháng khi monthKey trống → gom MỌI income pending từ
+ * mọi nguồn (Upwork/Projects/In3D/Ledger) và mọi tháng. Truyền monthKey để lọc.
+ */
 export async function getReceivables(monthKey?: string): Promise<ReceivableItem[]> {
   const sb = await createClient();
   let q = sb.from("v_receivable_items").select("*");
   if (monthKey) q = q.eq("month_key", monthKey);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map((r) => ({ ...r, amount: Number(r.amount) }));
+  return (data ?? []).map((r) => ({
+    tx_id: r.tx_id,
+    amount: Number(r.amount),
+    month_key: r.month_key,
+    note: r.note ?? null,
+    source: r.source ?? null,
+    module: r.module ?? "Khác",
+    ref_label: r.ref_label ?? null,
+  }));
 }
 
 export async function getNetWorth(): Promise<NetWorth> {

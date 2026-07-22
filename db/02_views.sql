@@ -91,7 +91,9 @@ join income_sources s on s.id = t.source_id
 where t.type = 'income' and t.status in ('pending','received')
 group by t.month_key, s.name, s.sort;
 
--- ---------- Receivables (pending income txs) ---------------------------------
+-- ---------- Receivables (pending income txs, MỌI nguồn/tháng) ----------------
+-- Gom mọi income pending bất kể tháng. module = nhóm nguồn (Upwork/Projects/In3D/
+-- Khác) suy từ ref_table; ref_label = tên hiển thị của bản ghi module gốc.
 create or replace view v_receivable_items as
 select
   t.id as tx_id,
@@ -101,9 +103,25 @@ select
   s.name as source,
   t.ref_table,
   t.ref_id,
+  case t.ref_table
+    when 'upwork_contracts' then 'Upwork'
+    when 'milestones'       then 'Projects'
+    when 'print_orders'     then 'In3D'
+    else coalesce(s.name, 'Khác')
+  end as module,
+  coalesce(
+    uc.client,
+    (pj.name || ' · ' || ms.name),
+    po.name,
+    t.note
+  ) as ref_label,
   t.created_at
 from transactions t
-left join income_sources s on s.id = t.source_id
+left join income_sources s   on s.id = t.source_id
+left join upwork_contracts uc on t.ref_table = 'upwork_contracts' and uc.id = t.ref_id
+left join milestones ms       on t.ref_table = 'milestones'       and ms.id = t.ref_id
+left join projects pj         on pj.id = ms.project_id
+left join print_orders po     on t.ref_table = 'print_orders'     and po.id = t.ref_id
 where t.type = 'income' and t.status = 'pending'
 order by t.created_at desc;
 
