@@ -92,8 +92,7 @@ export const radius = { sm: 9, md: 12, card: 16, cardLg: 18, modal: 20, pill: 99
 /** Navigation dùng chung cho AppShell. */
 export const navItems = [
   { href: "/", label: "Dashboard", icon: "ph-duotone ph-squares-four" },
-  { href: "/ledger", label: "Ledger", icon: "ph-duotone ph-notebook" },
-  { href: "/accounts", label: "Tài khoản", icon: "ph-duotone ph-wallet" },
+  { href: "/ledger", label: "Ledger/Account", icon: "ph-duotone ph-notebook" },
   { href: "/in3d", label: "In3D", icon: "ph-duotone ph-cube-transparent" },
   { href: "/upwork", label: "Upwork", icon: "ph-duotone ph-globe" },
   { href: "/projects", label: "Projects", icon: "ph-duotone ph-briefcase" },

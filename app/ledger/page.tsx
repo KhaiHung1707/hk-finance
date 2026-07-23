@@ -1,11 +1,13 @@
 import { AppShell } from "@/components/ui/AppShell";
-import { LedgerClient } from "@/components/ledger/LedgerClient";
+import { LedgerAccountClient } from "@/components/ledger/LedgerAccountClient";
 import {
   getLedgerRows,
   getMonthlySummary,
   getIncomeSources,
   getExpenseCategories,
   getAccountsRef,
+  getAccountBalances,
+  getNetWorth,
   getBaselineMonthKey,
   getMonthKeys,
   getMonthCloseStatus,
@@ -17,31 +19,37 @@ export const dynamic = "force-dynamic";
 export default async function LedgerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string; tab?: string }>;
 }) {
   const sp = await searchParams;
   const [baseline, allMonths] = await Promise.all([getBaselineMonthKey(), getMonthKeys()]);
-  // tháng đang xem: URL param nếu hợp lệ, ngược lại baseline.
   const monthKey = sp.month && allMonths.includes(sp.month) ? sp.month : baseline;
+  const initialTab = sp.tab === "accounts" ? "accounts" : "ledger";
 
-  const [rows, summary, sources, categories, accounts, closeStatus, profile] = await Promise.all([
-    getLedgerRows(monthKey),
-    getMonthlySummary(monthKey),
-    getIncomeSources(),
-    getExpenseCategories(),
-    getAccountsRef(),
-    getMonthCloseStatus(monthKey),
-    getProfile(),
-  ]);
+  const [rows, summary, sources, categories, accountsRef, accountBalances, nw, closeStatus, profile] =
+    await Promise.all([
+      getLedgerRows(monthKey),
+      getMonthlySummary(monthKey),
+      getIncomeSources(),
+      getExpenseCategories(),
+      getAccountsRef(),
+      getAccountBalances(),
+      getNetWorth(),
+      getMonthCloseStatus(monthKey),
+      getProfile(),
+    ]);
+
+  const accTotal = accountBalances.reduce((s, a) => s + a.balance, 0);
 
   return (
     <AppShell
       activePath="/ledger"
-      eyebrow="Single ledger — every money movement"
-      title="Ledger"
+      eyebrow="Sổ giao dịch · tài khoản — nhập nhanh mọi loại"
+      title="Ledger / Account"
       user={{ initials: profile.initials, name: profile.name || undefined, role: profile.role }}
     >
-      <LedgerClient
+      <LedgerAccountClient
+        initialTab={initialTab}
         monthKey={monthKey}
         months={allMonths}
         closed={closeStatus.closed}
@@ -49,7 +57,13 @@ export default async function LedgerPage({
         summary={summary}
         sources={sources}
         categories={categories}
-        accounts={accounts}
+        accounts={accountsRef}
+        accountBalances={accountBalances}
+        accTotal={accTotal}
+        gold={nw.gold}
+        stock={nw.stock}
+        deposits={nw.deposits}
+        netWorth={nw.total}
       />
     </AppShell>
   );

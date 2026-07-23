@@ -37,6 +37,7 @@ export function LedgerClient({
   sources,
   categories,
   accounts,
+  hideOwnAddButton = false,
 }: {
   monthKey: string;
   months?: string[];
@@ -46,6 +47,7 @@ export function LedgerClient({
   sources: Ref[];
   categories: Ref[];
   accounts: Ref[];
+  hideOwnAddButton?: boolean;
 }) {
   const router = useRouter();
   const [entryKind, setEntryKind] = useState<"income" | "expense" | null>(null);
@@ -115,23 +117,25 @@ export function LedgerClient({
 
   return (
     <>
-      {/* Nút Income/Expense hiển thị ở header band qua portal */}
-      <HeaderPortal>
-        <button
-          onClick={() => setEntryKind("income")}
-          className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
-        >
-          <i className="ph-duotone ph-plus-circle" aria-hidden />
-          Income
-        </button>
-        <button
-          onClick={() => setEntryKind("expense")}
-          className="flex items-center gap-2 bg-primary-dark text-white border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#0A211C]"
-        >
-          <i className="ph-duotone ph-minus-circle" aria-hidden />
-          Expense
-        </button>
-      </HeaderPortal>
+      {/* Nút Income/Expense qua portal — ẩn khi dùng nút "Thêm" chung của trang gộp */}
+      {!hideOwnAddButton && (
+        <HeaderPortal>
+          <button
+            onClick={() => setEntryKind("income")}
+            className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
+          >
+            <i className="ph-duotone ph-plus-circle" aria-hidden />
+            Income
+          </button>
+          <button
+            onClick={() => setEntryKind("expense")}
+            className="flex items-center gap-2 bg-primary-dark text-white border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#0A211C]"
+          >
+            <i className="ph-duotone ph-minus-circle" aria-hidden />
+            Expense
+          </button>
+        </HeaderPortal>
+      )}
 
       {/* Filter bar */}
       <div className="bg-card border border-card-border rounded-[16px] px-4 py-3 flex items-center gap-[10px] flex-wrap">

@@ -5,7 +5,7 @@ import { fmt, full } from "@/lib/format";
 import { accountIcon, groupColor } from "@/lib/design/tokens";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
+import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
 import {
   adjustAccountBalance,
   createAccount,
@@ -246,7 +246,7 @@ export function AccountsClient({
             phần chênh lệch (tháng {monthKey}).
           </div>
           <Field label="Số dư thực tế (₫)">
-            <TextInput type="number" value={actual} onChange={(e) => setActual(e.target.value)} placeholder="0" autoFocus />
+            <MoneyInput value={actual} onValueChange={setActual} placeholder="0" autoFocus />
           </Field>
           {actual !== "" && (
             <div
@@ -292,7 +292,7 @@ export function AccountsClient({
               </Select>
             </Field>
             <Field label="Số dư đầu kỳ (₫)">
-              <TextInput type="number" value={newOpening} onChange={(e) => setNewOpening(e.target.value)} placeholder="0" />
+              <MoneyInput value={newOpening} onValueChange={setNewOpening} placeholder="0" />
             </Field>
           </FieldRow>
           <Field label="Ghi chú (tuỳ chọn)">

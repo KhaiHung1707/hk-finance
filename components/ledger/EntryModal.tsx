@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
+import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
 import { txTypeStyle } from "@/lib/design/tokens";
 import { recordIncome, recordExpense } from "@/lib/actions/ledger";
 import type { Ref } from "@/lib/queries";
@@ -117,12 +117,7 @@ export function EntryModal({
 
         <FieldRow>
           <Field label="Số tiền (₫)">
-            <TextInput
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-            />
+            <MoneyInput value={amount} onValueChange={setAmount} placeholder="0" />
           </Field>
           <Field label="Tài khoản">
             <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>

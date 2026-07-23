@@ -20,6 +20,7 @@ export async function recordIncome(input: {
   status: "pending" | "received";
   accountId: string | null;
   note?: string;
+  occurredOn?: string;
 }) {
   return guard(async () => {
     const amount = positive(input.amount, "amount");
@@ -31,6 +32,7 @@ export async function recordIncome(input: {
       p_status: input.status,
       p_account_id: input.status === "received" ? input.accountId : null,
       p_note: input.note ?? null,
+      p_occurred_on: input.occurredOn || null,
     });
     if (error) return { ok: false, error: error.message };
     revalidate();
@@ -44,6 +46,7 @@ export async function recordExpense(input: {
   monthKey: string;
   accountId: string;
   note?: string;
+  occurredOn?: string;
 }) {
   return guard(async () => {
     const amount = positive(input.amount, "amount");
@@ -54,6 +57,7 @@ export async function recordExpense(input: {
       p_month_key: input.monthKey,
       p_account_id: input.accountId,
       p_note: input.note ?? null,
+      p_occurred_on: input.occurredOn || null,
     });
     if (error) return { ok: false, error: error.message };
     revalidate();
@@ -67,6 +71,7 @@ export async function recordTransfer(input: {
   amount: number;
   monthKey: string;
   note?: string;
+  occurredOn?: string;
 }) {
   return guard(async () => {
     const amount = positive(input.amount, "amount");
@@ -80,6 +85,7 @@ export async function recordTransfer(input: {
       p_amount: amount,
       p_month_key: input.monthKey,
       p_note: input.note ?? null,
+      p_occurred_on: input.occurredOn || null,
     });
     if (error) return { ok: false, error: error.message };
     revalidate();
