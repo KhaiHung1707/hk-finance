@@ -1,23 +1,31 @@
 import { AppShell } from "@/components/ui/AppShell";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MoneyText } from "@/components/ui/MoneyText";
-import { InvestmentsClient } from "@/components/investments/InvestmentsClient";
+import { InvestClient } from "@/components/investments/InvestClient";
 import { getDeposits, getStockPositions, getStockHistory } from "@/lib/queries/investments";
-import { getAccountsRef, getBaselineMonthKey, getProfile } from "@/lib/queries";
+import { getAccountsRef, getBaselineMonthKey, getProfile, getAllocation, getNetWorth } from "@/lib/queries";
+import { getGoldLots, getGoldSummary, getGoldPrice } from "@/lib/queries/assets";
 import { getDepositEarlyRate } from "@/lib/queries/settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function InvestmentsPage() {
   const monthKey = await getBaselineMonthKey();
-  const [deposits, positions, history, accounts, earlyRate, profile] = await Promise.all([
-    getDeposits(),
-    getStockPositions(),
-    getStockHistory(),
-    getAccountsRef(),
-    getDepositEarlyRate(),
-    getProfile(),
-  ]);
+  const [deposits, positions, history, accounts, earlyRate, goldLots, goldSummary, goldPrice, allocation, netWorth, profile] =
+    await Promise.all([
+      getDeposits(),
+      getStockPositions(),
+      getStockHistory(),
+      getAccountsRef(),
+      getDepositEarlyRate(),
+      getGoldLots(),
+      getGoldSummary(),
+      getGoldPrice(),
+      getAllocation(),
+      getNetWorth(),
+      getProfile(),
+    ]);
+  const allocationTotal = netWorth.total;
 
   const activeDeposits = deposits.filter((d) => d.status === "active");
   const depTotal = activeDeposits.reduce((s, d) => s + d.principal, 0);
@@ -78,13 +86,18 @@ export default async function InvestmentsPage() {
         />
       </div>
 
-      <InvestmentsClient
+      <InvestClient
         monthKey={monthKey}
         deposits={deposits}
         positions={positions}
         history={history}
         accounts={accounts}
         earlyRate={earlyRate}
+        goldLots={goldLots}
+        goldSummary={goldSummary}
+        goldSuggestedPrice={goldPrice.price}
+        allocation={allocation}
+        allocationTotal={allocationTotal}
       />
     </AppShell>
   );

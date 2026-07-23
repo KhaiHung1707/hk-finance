@@ -96,7 +96,6 @@ export const navItems = [
   { href: "/in3d", label: "In3D", icon: "ph-duotone ph-cube-transparent" },
   { href: "/upwork", label: "Upwork", icon: "ph-duotone ph-globe" },
   { href: "/projects", label: "Projects", icon: "ph-duotone ph-briefcase" },
-  { href: "/assets", label: "Assets", icon: "ph-duotone ph-coins" },
   { href: "/investments", label: "Invest", icon: "ph-duotone ph-chart-line-up" },
   { href: "/forecast", label: "Forecast", icon: "ph-duotone ph-chart-line" },
   { href: "/history", label: "Lịch sử", icon: "ph-duotone ph-clock-counter-clockwise" },

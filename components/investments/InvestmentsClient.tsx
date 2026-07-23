@@ -1,12 +1,14 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { fmt, full, pct } from "@/lib/format";
+import { fmt, full, pct, chi } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { GoldLotsCard } from "@/components/assets/GoldLotsCard";
+import { BuyGoldButton } from "@/components/assets/BuyGoldButton";
 import {
   openDeposit,
   updateDeposit,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/actions/investments";
 import { updatePrice } from "@/lib/actions/assets";
 import type { DepositPosition, StockPosition, StockHistoryRow } from "@/lib/queries/investments";
+import type { GoldLot, GoldSummary } from "@/lib/queries/assets";
 import type { Ref } from "@/lib/queries";
 
 const DEP_GRID = "1.3fr 110px 80px 118px 96px 130px 128px 100px 130px";
@@ -45,6 +48,9 @@ export function InvestmentsClient({
   history,
   accounts,
   earlyRate,
+  goldLots,
+  goldSummary,
+  goldSuggestedPrice,
 }: {
   monthKey: string;
   deposits: DepositPosition[];
@@ -52,9 +58,12 @@ export function InvestmentsClient({
   history: Record<string, StockHistoryRow[]>;
   accounts: Ref[];
   earlyRate: number;
+  goldLots: GoldLot[];
+  goldSummary: GoldSummary;
+  goldSuggestedPrice: number;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"deposits" | "stocks">("deposits");
+  const [tab, setTab] = useState<"deposits" | "stocks" | "gold">("deposits");
   const [modal, setModal] = useState<ModalKind>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -136,15 +145,20 @@ export function InvestmentsClient({
 
   return (
     <>
-      <HeaderPortal>
-        <button
-          onClick={() => open(tab === "stocks" ? { kind: "buy" } : { kind: "deposit" })}
-          className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
-        >
-          <i className="ph-duotone ph-plus-circle" aria-hidden />
-          {tab === "stocks" ? "Buy stock" : "New deposit"}
-        </button>
-      </HeaderPortal>
+      {tab !== "gold" && (
+        <HeaderPortal>
+          <button
+            onClick={() => open(tab === "stocks" ? { kind: "buy" } : { kind: "deposit" })}
+            className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
+          >
+            <i className="ph-duotone ph-plus-circle" aria-hidden />
+            {tab === "stocks" ? "Buy stock" : "New deposit"}
+          </button>
+        </HeaderPortal>
+      )}
+      {tab === "gold" && (
+        <BuyGoldButton accounts={accounts} monthKey={monthKey} suggestedPrice={goldSuggestedPrice} />
+      )}
 
       {toast && (
         <div className="bg-[#DFF2E7] border border-[#B6E0C8] text-[#1F7A5C] rounded-[12px] px-4 py-3 text-[13px] font-semibold flex items-center gap-2">
@@ -159,6 +173,9 @@ export function InvestmentsClient({
         </button>
         <button role="tab" aria-selected={tab === "stocks"} onClick={() => setTab("stocks")} className={tabBtn(tab === "stocks")}>
           Stocks
+        </button>
+        <button role="tab" aria-selected={tab === "gold"} onClick={() => setTab("gold")} className={tabBtn(tab === "gold")}>
+          Gold
         </button>
       </div>
 
@@ -219,7 +236,7 @@ export function InvestmentsClient({
             </div>
           </div>
         </div>
-      ) : (
+      ) : tab === "stocks" ? (
         <div className="bg-card border border-card-border rounded-[16px] overflow-hidden">
           {positions.length === 0 ? (
             <div className="px-5 py-14 text-center">
@@ -403,6 +420,31 @@ export function InvestmentsClient({
               </div>
             </div>
           )}
+        </div>
+      ) : (
+        /* ===== Tab Gold ===== */
+        <div className="flex flex-col gap-[14px]">
+          <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+            <div className="bg-card border border-card-border rounded-[18px] p-5">
+              <div className="text-[11px] text-muted font-semibold">Số chỉ</div>
+              <div className="text-[20px] font-extrabold mt-1 tnum">{chi(goldSummary.qty_chi)}</div>
+            </div>
+            <div className="bg-card border border-card-border rounded-[18px] p-5">
+              <div className="text-[11px] text-muted font-semibold">Giá vốn TB</div>
+              <div className="text-[20px] font-extrabold mt-1 tnum" title={full(goldSummary.avg_cost)}>{fmt(goldSummary.avg_cost)}</div>
+            </div>
+            <div className="bg-card border border-card-border rounded-[18px] p-5">
+              <div className="text-[11px] text-muted font-semibold">Giá trị thị trường</div>
+              <div className="text-[20px] font-extrabold mt-1 tnum" title={full(goldSummary.market_value)}>{fmt(goldSummary.market_value)}</div>
+            </div>
+            <div className="bg-card border border-card-border rounded-[18px] p-5">
+              <div className="text-[11px] text-muted font-semibold">Lãi/lỗ chưa thực hiện</div>
+              <div className="text-[20px] font-extrabold mt-1 tnum" style={{ color: goldSummary.unrealized >= 0 ? "#1F7A5C" : "#B4573B" }} title={full(goldSummary.unrealized)}>
+                {goldSummary.unrealized >= 0 ? "+" : "−"}{fmt(Math.abs(goldSummary.unrealized))}
+              </div>
+            </div>
+          </div>
+          <GoldLotsCard lots={goldLots} accounts={accounts} monthKey={monthKey} />
         </div>
       )}
 

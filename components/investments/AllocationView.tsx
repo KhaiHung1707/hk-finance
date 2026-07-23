@@ -1,0 +1,133 @@
+import { fmt, full, pct } from "@/lib/format";
+import type { AllocationRow } from "@/lib/queries";
+
+const GRP_META: Record<string, { label: string; color: string }> = {
+  cash: { label: "Cash", color: "#17554A" },
+  gold: { label: "Gold", color: "#8FBCA7" },
+  stock: { label: "Stocks", color: "#C9A227" },
+};
+
+/** Tab "Phân bổ": value-per-class + current vs target + rebalance. Tách từ Assets. */
+export function AllocationView({ allocation, total }: { allocation: AllocationRow[]; total: number }) {
+  const rebalance = allocation
+    .map((a) => ({
+      grp: a.grp,
+      delta: total * a.target - a.value,
+      from: total > 0 ? a.value / total : 0,
+      to: a.target,
+    }))
+    .filter((r) => Math.abs(r.delta) > total * 0.005)
+    .sort((a, b) => b.delta - a.delta);
+
+  return (
+    <div className="flex flex-col gap-[14px]">
+      {/* value per class */}
+      <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}>
+        {allocation.map((a) => {
+          const share = total > 0 ? a.value / total : 0;
+          const off = share - a.target;
+          const color = Math.abs(off) > 0.05 ? (off > 0 ? "#B4573B" : "#A5731F") : "#1F7A5C";
+          return (
+            <div key={a.grp} className="bg-card border border-card-border rounded-[18px] p-5">
+              <div className="flex items-center gap-2 text-[12px] text-muted font-semibold">
+                <div className="w-[10px] h-[10px] rounded-[3px]" style={{ background: GRP_META[a.grp].color }} />
+                {GRP_META[a.grp].label}
+              </div>
+              <div className="text-[24px] font-extrabold tracking-[-0.6px] mt-2 tnum" title={full(a.value)}>
+                {fmt(a.value)}
+              </div>
+              <div className="text-[12px] mt-[6px] font-semibold" style={{ color }}>
+                {pct(share, 0)} · target {pct(a.target, 0)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-[14px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(360px,1fr))" }}>
+        {/* Current vs target */}
+        <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
+          <div className="text-[15px] font-bold mb-4">Current vs. target allocation</div>
+          <div className="flex flex-col gap-[18px]">
+            {allocation.map((a) => {
+              const share = total > 0 ? a.value / total : 0;
+              const gap = share - a.target;
+              const over = gap > 0.005;
+              const under = gap < -0.005;
+              const gapColor = over ? "#B4573B" : under ? "#A5731F" : "#1F7A5C";
+              return (
+                <div key={a.grp}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-[9px] text-[13px] font-semibold">
+                      <div className="w-[11px] h-[11px] rounded-[3px]" style={{ background: GRP_META[a.grp].color }} />
+                      {GRP_META[a.grp].label}
+                    </div>
+                    <div className="text-[13px] font-bold tnum" title={full(a.value)}>
+                      {fmt(a.value)} · {pct(share, 0)}
+                    </div>
+                  </div>
+                  <div className="relative h-3 rounded-full bg-[#EFEAE0] overflow-hidden">
+                    <div
+                      className="absolute left-0 top-0 bottom-0 rounded-full"
+                      style={{ width: `${Math.min(share * 100, 100)}%`, background: GRP_META[a.grp].color }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-[6px] mt-[6px] text-[11px] text-muted">
+                    <i className="ph-duotone ph-target" style={{ color: "#A5731F" }} aria-hidden />
+                    Target {pct(a.target, 0)} ·{" "}
+                    <span style={{ color: gapColor, fontWeight: 700 }}>
+                      {over
+                        ? `+${Math.round(gap * 100)}pt over`
+                        : under
+                          ? `${Math.round(gap * 100)}pt under`
+                          : "on target"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Rebalance */}
+        <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
+          <div className="text-[15px] font-bold mb-[6px]">Rebalance to target</div>
+          <div className="text-[12px] text-muted mb-4">Chuyển dịch để mỗi nhóm về đúng tỷ trọng mục tiêu.</div>
+          <div className="flex flex-col gap-[10px]">
+            {rebalance.length === 0 && (
+              <div className="text-[13px] text-muted">Danh mục đã cân bằng gần mục tiêu.</div>
+            )}
+            {rebalance.map((r) => {
+              const up = r.delta > 0;
+              return (
+                <div
+                  key={r.grp}
+                  className="flex items-center gap-3 border border-[#EFEAE0] rounded-[12px] px-[14px] py-3 hover:border-[#C9C0AC] hover:bg-[#FAF8F2]"
+                >
+                  <div
+                    className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[17px]"
+                    style={{ background: up ? "#DFF2E7" : "#F7E3DC", color: up ? "#1F7A5C" : "#B4573B" }}
+                  >
+                    <i className={up ? "ph-duotone ph-arrow-up-right" : "ph-duotone ph-arrow-down-right"} aria-hidden />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[13px] font-semibold">
+                      {up ? "Tăng" : "Giảm"} {GRP_META[r.grp].label}
+                    </div>
+                    <div className="text-[11px] text-muted">
+                      {pct(r.from, 0)} → {pct(r.to, 0)} target
+                    </div>
+                  </div>
+                  <div className="text-[14px] font-extrabold tnum" title={full(Math.abs(r.delta))}>
+                    {up ? "+" : "−"}
+                    {fmt(Math.abs(r.delta))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
