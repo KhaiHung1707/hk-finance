@@ -94,6 +94,9 @@ group by t.month_key, s.name, s.sort;
 -- ---------- Receivables (pending income txs, MỌI nguồn/tháng) ----------------
 -- Gom mọi income pending bất kể tháng. module = nhóm nguồn (Upwork/Projects/In3D/
 -- Khác) suy từ ref_table; ref_label = tên hiển thị của bản ghi module gốc.
+-- DROP trước: thêm cột module/ref_label đổi thứ tự cột → create-or-replace không cho.
+-- CASCADE để drop luôn v_receivables (phụ thuộc); tạo lại ngay bên dưới.
+drop view if exists v_receivable_items cascade;
 create or replace view v_receivable_items as
 select
   t.id as tx_id,
