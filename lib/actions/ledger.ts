@@ -142,6 +142,15 @@ export async function closeMonth(monthKey: string) {
   return { ok: true };
 }
 
+/** Lùi 1 bước trạng thái module (rollback đúng, giữ số dư). */
+export async function rollbackStatus(refTable: string, refId: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("rollback_status", { p_ref_table: refTable, p_ref_id: refId });
+  if (error) return { ok: false, error: error.message };
+  revalidate();
+  return { ok: true };
+}
+
 /** Mở lại tháng đã chốt (rollback nếu lỡ bấm nhầm). */
 export async function reopenMonth(monthKey: string) {
   const sb = await createClient();

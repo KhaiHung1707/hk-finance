@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { createContract, updateContract, activateContract, billContract, receiveContract, cancelContract } from "@/lib/actions/upwork";
+import { rollbackStatus } from "@/lib/actions/ledger";
 import type { UpworkContract } from "@/lib/queries/upwork";
 import type { Ref } from "@/lib/queries";
 
@@ -223,6 +224,22 @@ export function UpworkClient({
                     Mark received
                   </button>
                 )}
+                {/* Lùi 1 bước trạng thái (rollback) */}
+                {(c.status === "active" || c.status === "billed" || c.status === "received") && (
+                  <button
+                    onClick={() => {
+                      const back = c.status === "received" ? "billed" : c.status === "billed" ? "draft" : "draft";
+                      if (confirm(`Lùi "${c.client}" từ ${c.status} → ${back}?${c.status === "received" ? " Tiền sẽ rút khỏi tài khoản (về chờ thu)." : c.status === "billed" ? " Hoá đơn (tx chờ thu) sẽ bị xoá." : ""}`))
+                        doAction(() => rollbackStatus("upwork_contracts", c.id));
+                    }}
+                    disabled={busy}
+                    aria-label="Lùi trạng thái"
+                    title="Lùi 1 bước trạng thái"
+                    className="bg-chip text-ink-soft border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary disabled:opacity-50"
+                  >
+                    <i className="ph-duotone ph-arrow-counter-clockwise" aria-hidden />
+                  </button>
+                )}
                 {(c.status === "draft" || c.status === "active" || c.status === "billed") && (
                   <button
                     onClick={() => {
@@ -236,7 +253,7 @@ export function UpworkClient({
                     <i className="ph-duotone ph-x-circle" aria-hidden />
                   </button>
                 )}
-                {(c.status === "received" || c.status === "cancelled") && (
+                {c.status === "cancelled" && (
                   <span className="text-faint text-[11px] font-semibold">—</span>
                 )}
               </div>

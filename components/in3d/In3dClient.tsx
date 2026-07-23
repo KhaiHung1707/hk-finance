@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { ReceiveModal } from "@/components/ledger/ReceiveModal";
+import { useRouter } from "next/navigation";
 import { buyFilament, createPrintOrder, cancelPrintOrder } from "@/lib/actions/in3d";
+import { rollbackStatus } from "@/lib/actions/ledger";
 import type { FilamentStock, PrintOrder } from "@/lib/queries/in3d";
 import type { Ref } from "@/lib/queries";
 
@@ -27,6 +29,7 @@ export function In3dClient({
   orders: PrintOrder[];
   accounts: Ref[];
 }) {
+  const router = useRouter();
   const [tab, setTab] = useState<"orders" | "stock">("orders");
   const [modal, setModal] = useState<"buy" | "order" | null>(null);
   const [receiveTx, setReceiveTx] = useState<{ id: string; amount: number; label: string } | null>(null);
@@ -242,13 +245,28 @@ export function In3dClient({
                     {sm.label}
                   </Badge>
                 </div>
-                <div className="flex justify-end gap-[6px]">
+                <div className="flex justify-end items-center gap-[6px]">
                   {o.status === "pending" && o.income_tx_id && (
                     <button
                       onClick={() => setReceiveTx({ id: o.income_tx_id!, amount: o.price, label: o.name })}
                       className="bg-primary text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap"
                     >
                       Mark received
+                    </button>
+                  )}
+                  {o.status === "received" && (
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Lùi "${o.name}" từ received → pending? Tiền về chờ thu.`)) return;
+                        const res = await rollbackStatus("print_orders", o.id);
+                        if (!res.ok) return alert(res.error);
+                        router.refresh();
+                      }}
+                      aria-label="Lùi trạng thái"
+                      title="Lùi về chờ thu"
+                      className="bg-chip text-ink-soft border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary"
+                    >
+                      <i className="ph-duotone ph-arrow-counter-clockwise" aria-hidden />
                     </button>
                   )}
                 </div>

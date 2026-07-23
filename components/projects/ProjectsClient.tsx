@@ -16,6 +16,7 @@ import {
   collectMilestone,
   cancelMilestone,
 } from "@/lib/actions/projects";
+import { rollbackStatus } from "@/lib/actions/ledger";
 import type { ProjectFinance, Milestone } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
 
@@ -276,6 +277,22 @@ export function ProjectsClient({
                       >
                         {m.status === "received" ? "Đã thu" : "Đã huỷ"}
                       </span>
+                    )}
+                    {/* Lùi 1 bước trạng thái milestone */}
+                    {(m.status === "billed" || m.status === "received") && (
+                      <button
+                        onClick={() => {
+                          const back = m.status === "received" ? "billed" : "draft";
+                          if (confirm(`Lùi "${m.name}" từ ${m.status} → ${back}?${m.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`))
+                            doAction(() => rollbackStatus("milestones", m.id));
+                        }}
+                        disabled={busy}
+                        aria-label="Lùi trạng thái"
+                        title="Lùi 1 bước trạng thái"
+                        className="ml-[2px] bg-transparent text-muted border-0 rounded-full w-[26px] h-[26px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary disabled:opacity-50"
+                      >
+                        <i className="ph-duotone ph-arrow-counter-clockwise" aria-hidden />
+                      </button>
                     )}
                     {(m.status === "draft" || m.status === "billed") && (
                       <button
