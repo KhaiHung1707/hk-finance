@@ -245,14 +245,26 @@ end $$;
 
 create or replace function update_project(
   p_id uuid, p_client text, p_name text, p_currency text,
-  p_contract_value numeric, p_status text, p_location text
+  p_contract_value numeric, p_status text, p_location text, p_source text default null
 ) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   update projects
     set client = p_client, name = p_name, currency = p_currency,
-        contract_value = p_contract_value, status = p_status, location = p_location
+        contract_value = p_contract_value, status = p_status, location = p_location,
+        source_id = coalesce(_source_id(p_source), source_id)
   where id = p_id;
+end $$;
+
+-- delete_project: xoá project + milestones (cascade). CHẶN nếu có milestone đã
+-- bill/received (đã vào ledger) — phải huỷ/lùi trước để không lệch số dư.
+create or replace function delete_project(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from milestones where project_id = p_id and status in ('billed','received')) then
+    raise exception 'delete_project: còn milestone đã bill/thu — huỷ hoặc lùi trước khi xoá';
+  end if;
+  delete from projects where id = p_id; -- milestones draft/cancelled cascade
 end $$;
 
 create or replace function create_milestone(

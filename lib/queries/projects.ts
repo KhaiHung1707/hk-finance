@@ -25,6 +25,7 @@ export type ProjectFinance = {
   outstanding_vnd: number;
   milestone_count: number;
   milestone_paid: number;
+  source: string | null;
   milestones: Milestone[];
 };
 
@@ -67,6 +68,7 @@ export async function getProjects(): Promise<ProjectFinance[]> {
     outstanding_vnd: Number(p.outstanding_vnd),
     milestone_count: Number(p.milestone_count),
     milestone_paid: Number(p.milestone_paid),
+    source: p.source ?? null,
     milestones: byProject.get(p.id) ?? [],
   }));
 }

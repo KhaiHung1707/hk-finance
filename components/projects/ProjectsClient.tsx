@@ -4,11 +4,12 @@ import { fmt, full } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
-import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
+import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import {
   createProject,
   updateProject,
+  deleteProject,
   createMilestone,
   updateMilestone,
   deleteMilestone,
@@ -57,17 +58,20 @@ type EditState = {
   contractValue: string;
   status: string;
   location: string;
+  source: string;
 };
 
 export function ProjectsClient({
   monthKey,
   projects,
   accounts,
+  sources,
   fx,
 }: {
   monthKey: string;
   projects: ProjectFinance[];
   accounts: Ref[];
+  sources: Ref[];
   fx: Record<string, number>;
 }) {
   const [edit, setEdit] = useState<EditState | null>(null);
@@ -83,8 +87,9 @@ export function ProjectsClient({
     if (!res.ok) alert(res.error);
   }
 
+  const defaultSource = sources[0]?.name ?? "Structure";
   function openNew() {
-    setEdit({ id: null, client: "", name: "", currency: "CAD", contractValue: "", status: "active", location: "" });
+    setEdit({ id: null, client: "", name: "", currency: "CAD", contractValue: "", status: "active", location: "", source: defaultSource });
   }
   function openEdit(p: ProjectFinance) {
     setEdit({
@@ -95,6 +100,7 @@ export function ProjectsClient({
       contractValue: p.contract_value != null ? String(p.contract_value) : "",
       status: p.status,
       location: p.location ?? "",
+      source: p.source ?? defaultSource,
     });
   }
 
@@ -108,10 +114,21 @@ export function ProjectsClient({
       contractValue: edit.contractValue ? Number(edit.contractValue) : null,
       status: edit.status,
       location: edit.location,
+      source: edit.source,
     };
     const res = edit.id
       ? await updateProject({ id: edit.id, ...payload })
-      : await createProject({ ...payload, source: "Structure" });
+      : await createProject(payload);
+    setBusy(false);
+    if (!res.ok) return alert(res.error);
+    setEdit(null);
+  }
+
+  async function removeProject() {
+    if (!edit?.id) return;
+    if (!confirm(`Xoá dự án "${edit.name}"? Mọi milestone nháp sẽ bị xoá theo.`)) return;
+    setBusy(true);
+    const res = await deleteProject(edit.id);
     setBusy(false);
     if (!res.ok) return alert(res.error);
     setEdit(null);
@@ -120,11 +137,13 @@ export function ProjectsClient({
   async function addMilestone() {
     if (!edit?.id || !newMsName || !newMsAmount) return;
     setBusy(true);
+    // sort tự tăng theo số milestone hiện có của dự án (bỏ sort=0 cứng).
+    const existing = projects.find((pp) => pp.id === edit.id)?.milestones.length ?? 0;
     const res = await createMilestone({
       projectId: edit.id,
       name: newMsName,
       amount: Number(newMsAmount),
-      sort: 0,
+      sort: existing,
     });
     setBusy(false);
     if (!res.ok) return alert(res.error);
@@ -167,7 +186,7 @@ export function ProjectsClient({
                   <div className="text-[16px] font-bold">{p.name}</div>
                   <div className="text-[12px] text-muted mt-[2px]">
                     {p.client}
-                    {p.location ? ` · ${p.location}` : ""}
+                    {p.source ? ` · ${p.source}` : ""}
                   </div>
                 </div>
               </div>
@@ -333,12 +352,16 @@ export function ProjectsClient({
                 <Field label="Client">
                   <TextInput value={edit.client} onChange={(e) => setEdit({ ...edit, client: e.target.value })} />
                 </Field>
-                <Field label="Location">
-                  <TextInput value={edit.location} onChange={(e) => setEdit({ ...edit, location: e.target.value })} />
+                <Field label="Nguồn thu">
+                  <Select value={edit.source} onChange={(e) => setEdit({ ...edit, source: e.target.value })}>
+                    {sources.map((s) => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </Select>
                 </Field>
               </FieldRow>
               <FieldRow>
-                <Field label="Currency">
+                <Field label="Tiền tệ">
                   <Select
                     value={edit.currency}
                     onChange={(e) => setEdit({ ...edit, currency: e.target.value as "VND" | "CAD" | "USD" })}
@@ -348,15 +371,10 @@ export function ProjectsClient({
                     ))}
                   </Select>
                 </Field>
-                <Field label="Contract value">
-                  <TextInput
-                    type="number"
-                    value={edit.contractValue}
-                    onChange={(e) => setEdit({ ...edit, contractValue: e.target.value })}
-                    placeholder="0"
-                  />
+                <Field label="Giá trị hợp đồng">
+                  <MoneyInput value={edit.contractValue} onValueChange={(v) => setEdit({ ...edit, contractValue: v })} placeholder="0" />
                 </Field>
-                <Field label="Status">
+                <Field label="Trạng thái">
                   <Select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}>
                     {STATUSES.map((s) => (
                       <option key={s.v} value={s.v}>
@@ -453,11 +471,21 @@ export function ProjectsClient({
               )}
             </div>
             <ModalActions>
+              {edit.id && (
+                <button
+                  onClick={removeProject}
+                  disabled={busy}
+                  className="flex items-center gap-2 bg-[#F7E3DC] text-[#B4573B] border-0 rounded-full px-[16px] py-[10px] text-[13px] font-bold cursor-pointer hover:bg-[#F0D2C6] disabled:opacity-50"
+                >
+                  <i className="ph-duotone ph-trash" aria-hidden />
+                  Xoá
+                </button>
+              )}
               <Button variant="ghost" className="flex-1" onClick={() => setEdit(null)}>
                 Đóng
               </Button>
               <Button variant="primary" className="flex-1" onClick={saveProject} disabled={busy}>
-                {edit.id ? "Save changes" : "Create project"}
+                {edit.id ? "Lưu" : "Tạo dự án"}
               </Button>
             </ModalActions>
           </>

@@ -47,6 +47,7 @@ export async function updateProject(input: {
   contractValue: number | null;
   status: string;
   location: string;
+  source?: string;
 }) {
   return guard(async () => {
     const client = nonEmpty(input.client, "client");
@@ -62,11 +63,20 @@ export async function updateProject(input: {
       p_contract_value: contractValue,
       p_status: input.status,
       p_location: input.location || null,
+      p_source: input.source || null,
     });
     if (error) return { ok: false, error: error.message };
     rev();
     return { ok: true };
   });
+}
+
+export async function deleteProject(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("delete_project", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
 }
 
 export async function createMilestone(input: {

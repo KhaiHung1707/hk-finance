@@ -84,5 +84,6 @@ select
   coalesce((select sum(m.amount_vnd) from milestones m
             where m.project_id = p.id and m.status = 'billed'),0) as outstanding_vnd,
   (select count(*) from milestones m where m.project_id = p.id) as milestone_count,
-  (select count(*) from milestones m where m.project_id = p.id and m.status = 'received') as milestone_paid
+  (select count(*) from milestones m where m.project_id = p.id and m.status = 'received') as milestone_paid,
+  (select s.name from income_sources s where s.id = p.source_id) as source
 from projects p;
