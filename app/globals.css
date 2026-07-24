@@ -55,6 +55,48 @@ a:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Skeleton loading — shimmer chạy ngang trên nền xám nhạt (khớp tông giấy). */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #ece7db;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+/* Skeleton trên nền tối (band xanh header). */
+.skeleton-dark {
+  background: rgba(255, 255, 255, 0.13);
+}
+.skeleton-dark::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.18),
+    transparent
+  );
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+  }
+}
+
 /* Ẩn thanh cuộn cho nav ngang (vẫn cuộn được bằng trackpad/drag). */
 .no-scrollbar {
   scrollbar-width: none;
