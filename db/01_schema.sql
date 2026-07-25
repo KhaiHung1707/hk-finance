@@ -178,6 +178,7 @@ create table if not exists milestones (
   fx_rate      numeric,                 -- khoá khi bill (VND: 1)
   amount_vnd   bigint,                  -- freeze khi bill
   income_tx_id uuid references transactions(id),
+  due_on       date,                    -- ngày DỰ KIẾN bill/thu (cho Calendar) — khác billed_on/received_on (actual)
   billed_on    date,
   received_on  date,
   note         text,
@@ -198,6 +199,7 @@ create table if not exists upwork_contracts (
   fx_rate       numeric,                -- khoá khi bill
   amount_vnd    bigint,
   income_tx_id  uuid references transactions(id),
+  expected_on   date,                   -- ngày DỰ KIẾN bill/thu (cho Calendar) — khác billed_on/received_on (actual)
   billed_on     date,
   received_on   date,
   note          text
@@ -247,6 +249,12 @@ create table if not exists net_worth_snapshots (
   savings_rate      numeric not null default 0,
   as_of_date        date,                 -- ngày cuối tháng dùng để tính as-of
   is_reopened       boolean not null default false, -- đã từng mở lại (rollback)
+  -- backtest kế hoạch vs thực tế: NW headline DỰ PHÓNG cho tháng này (engine TS chạy
+  -- 1 bước từ snapshot tháng trước + plan lúc chốt). nullable → NULL = chưa có baseline
+  -- (tháng đầu / lỗi ghi), phân biệt với dự phóng = 0. Chỉ headline, KHÔNG per-group.
+  forecast_total    bigint,
+  forecast_scenario text,                  -- scenario dùng làm baseline (vd 'base')
+  forecast_taken_at timestamptz,           -- thời điểm freeze dự phóng
   taken_at  timestamptz not null default now()
 );
 
@@ -268,6 +276,11 @@ alter table milestones        add column if not exists received_on date;
 alter table upwork_contracts  add column if not exists billed_on   date;
 alter table upwork_contracts  add column if not exists received_on date;
 
+-- S-1 (Phase 4): ngày DỰ KIẾN bill/thu — đổ sự kiện có ngày lên Calendar/Agenda.
+-- Khác *_on actual (chỉ có giá trị khi đã xảy ra). Nullable, không phá dữ liệu cũ.
+alter table milestones        add column if not exists due_on      date;
+alter table upwork_contracts  add column if not exists expected_on date;
+
 -- Chốt theo tháng (Phase 1/2): khoá tháng + snapshot dòng tiền + as-of.
 alter table month_keys           add column if not exists closed_at timestamptz;
 alter table term_deposits        add column if not exists settled_on date;
@@ -278,3 +291,7 @@ alter table net_worth_snapshots  add column if not exists net               bigi
 alter table net_worth_snapshots  add column if not exists savings_rate      numeric not null default 0;
 alter table net_worth_snapshots  add column if not exists as_of_date        date;
 alter table net_worth_snapshots  add column if not exists is_reopened       boolean not null default false;
+-- Backtest (Phase 4): forecast baseline đóng băng lúc chốt.
+alter table net_worth_snapshots  add column if not exists forecast_total    bigint;
+alter table net_worth_snapshots  add column if not exists forecast_scenario text;
+alter table net_worth_snapshots  add column if not exists forecast_taken_at timestamptz;

@@ -5,10 +5,11 @@ import { sourceColor, chartPalette, groupColor } from "@/lib/design/tokens";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { Modal } from "@/components/ui/Modal";
 import { LineChart, type ChartSeries } from "@/components/ui/LineChart";
+import { WaterfallChart, type WaterfallStep } from "@/components/ui/WaterfallChart";
 import { NetWorthChart } from "@/components/forecast/NetWorthChart";
-import { runForecast } from "@/lib/forecast";
+import { runForecast, computeGoalPlan, computeScenarioCone, computeSensitivity } from "@/lib/forecast";
 import { setForecastPlanValue } from "@/lib/actions/settings";
-import type { ForecastParams, ForecastStart, ForecastSnapshot } from "@/lib/queries/forecast";
+import type { ForecastParams, ForecastStart, ForecastSnapshot, InvestGainGroup } from "@/lib/queries/forecast";
 
 function srcColor(name: string, idx: number): string {
   return sourceColor[name] ?? chartPalette[idx % chartPalette.length];
@@ -32,10 +33,12 @@ export function ForecastClient({
   params,
   start,
   snapshots,
+  investGainGroups,
 }: {
   params: ForecastParams;
   start: ForecastStart;
   snapshots: ForecastSnapshot[];
+  investGainGroups: InvestGainGroup[];
 }) {
   const scenarioKeys = Object.keys(params.scenarios);
   const [scenario, setScenario] = useState(scenarioKeys.includes("base") ? "base" : scenarioKeys[0]);
@@ -47,6 +50,7 @@ export function ForecastClient({
   const [planOverride, setPlanOverride] = useState<Record<string, number>>({});
   const [expenseOverride, setExpenseOverride] = useState<number | null>(null);
   const [showActual, setShowActual] = useState(true);
+  const [showCone, setShowCone] = useState(true);
   const [showAssumptions, setShowAssumptions] = useState(false);
 
   // params hiệu lực = params gốc + override (chưa cần đợi network).
@@ -68,16 +72,55 @@ export function ForecastClient({
   // có snapshot trong dải hiện tại → cho phép bật/tắt overlay "số thực tế".
   const snapInRange = snapshots.filter((s) => r.monthKeys.includes(s.month_key));
 
-  // Revenue by source → multi-line: mỗi nguồn 1 đường, values theo tháng.
-  const revenueLabels = r.months.map((m) => m.monthKey);
-  const revenueSeries: ChartSeries[] = r.sources.map((s, i) => ({
-    key: s.source,
-    label: s.source,
-    color: srcColor(s.source, i),
-    values: r.months.map((m) => m.bySource[s.source] ?? 0),
-  }));
+  // Cone dự phóng: min/max qua các scenario tại mỗi cột (nền mờ quanh đường headline).
+  const cone = useMemo(
+    () => (scenarioKeys.length >= 2 ? computeScenarioCone(effectiveParams, start, horizon).map((c) => c.series) : []),
+    [effectiveParams, start, horizon, scenarioKeys.length]
+  );
 
-  // Asset-class growth → multi-line (giống Revenue by source).
+  // Đường "số thực tế" liền — căn snapshot theo monthKeys (null ở tháng chưa có mốc).
+  const actualLine = useMemo(() => {
+    if (snapInRange.length === 0) return null;
+    const byKey = new Map(snapInRange.map((s) => [s.month_key, s.total]));
+    const line = r.monthKeys.map((mk) => byKey.get(mk) ?? null);
+    return line.some((v) => v != null) ? line : null;
+  }, [snapInRange, r.monthKeys]);
+
+  // Kế hoạch mục tiêu: khoảng cách, cần tiết kiệm/tháng, ETA từng scenario.
+  const goalPlan = useMemo(
+    () => (r.goalTarget > 0 ? computeGoalPlan(effectiveParams, start, r.goalTarget, params.houseGoal.target_year) : null),
+    [effectiveParams, start, r.goalTarget, params.houseGoal.target_year]
+  );
+
+  // Bóc tách "Investment gain" theo nhóm (point-in-time).
+  const investGainTotal = investGainGroups.reduce((s, g) => s + g.gain, 0);
+
+  // Waterfall dòng tiền cho 1 tháng dự phóng (mặc định tháng cuối horizon).
+  const [wfIdx, setWfIdx] = useState<number | null>(null);
+  const wfMonth = r.months.length ? r.months[wfIdx ?? r.months.length - 1] : null;
+  const wfSteps: WaterfallStep[] = wfMonth
+    ? [
+        { label: "Đầu kỳ", value: wfMonth.opening, kind: "total" },
+        { label: "Tiết kiệm", value: wfMonth.savings, kind: "delta" },
+        { label: "Lãi tài sản", value: wfMonth.return_, kind: "delta" },
+        { label: "Cuối kỳ", value: wfMonth.closing, kind: "total" },
+      ]
+    : [];
+
+  // Độ nhạy theo lợi suất quanh scenario hiện tại (±2%).
+  const sensitivity = useMemo(
+    () => computeSensitivity(effectiveParams, start, scenario, horizon),
+    [effectiveParams, start, scenario, horizon]
+  );
+  const sensPerPct = useMemo(() => {
+    // xấp xỉ "±1% lợi suất → ΔNW": lấy chênh giữa +1% và −1% chia 2.
+    const up = sensitivity.find((s) => Math.abs(s.deltaReturn - 0.01) < 1e-9);
+    const down = sensitivity.find((s) => Math.abs(s.deltaReturn + 0.01) < 1e-9);
+    if (up && down) return (up.endTotal - down.endTotal) / 2;
+    return null;
+  }, [sensitivity]);
+
+  // Asset-class growth → multi-line.
   const groupSeries: ChartSeries[] = r.groups
     .filter((g) => !(g.series[0] <= 0 && g.series[g.series.length - 1] <= 0))
     .map((g) => ({ key: g.key, label: g.label, color: groupColor[g.key], values: g.series }));
@@ -135,7 +178,7 @@ export function ForecastClient({
           <div className="text-[12px] text-ink-soft mt-[3px] font-semibold">Net worth in {horizon}M</div>
           <div className="inline-flex items-center gap-[4px] mt-[10px] text-[12px] font-extrabold text-[#1F7A5C] bg-[#DFF2E7] rounded-full px-[10px] py-[3px]">
             <i className="ph-fill ph-caret-up" aria-hidden />
-            +{fmt(r.totalGrowth)} vs hôm nay
+            +{fmt(r.totalGrowth)} · +{r.totalGrowthPct.toFixed(1)}% vs hôm nay
           </div>
         </div>
 
@@ -143,27 +186,69 @@ export function ForecastClient({
           icon="ph-duotone ph-trend-up"
           iconBg="#DFF2E7"
           iconFg="#1F7A5C"
-          label="Avg monthly growth"
+          label="Tăng trưởng kép/tháng"
           value={`${r.avgMonthlyPct >= 0 ? "+" : ""}${r.avgMonthlyPct.toFixed(2)}%`}
-          hint={`Tăng trưởng kép/tháng qua ${horizon} tháng`}
+          hint={`CAGR/tháng qua ${horizon} tháng · tương đương +${r.totalGrowthPct.toFixed(1)}% cả kỳ`}
           valueColor="#1F7A5C"
         />
+        {/* Đổi "Total income" (số trơ) → độ nhạy lợi suất: actionable insight */}
         <SummaryCard
-          icon="ph-duotone ph-coins"
-          label={`Total income · ${horizon}M`}
-          value={fmt(r.totalIncome)}
-          hint={`Thu ${full(r.totalIncome)} · chi ${full(r.totalExpense)} · net ${full(r.totalIncome - r.totalExpense)}`}
+          icon="ph-duotone ph-scales"
+          label="±1% lợi suất"
+          value={sensPerPct != null ? `${sensPerPct >= 0 ? "+" : "−"}${fmt(Math.abs(sensPerPct))}` : "—"}
+          hint={`Mỗi 1%/năm lợi suất đổi net worth sau ${horizon}M chừng này. Thu kỳ này ${full(r.totalIncome)} · chi ${full(r.totalExpense)}`}
         />
         <SummaryCard
           icon="ph-duotone ph-chart-line-up"
           iconBg="#DFF2E7"
           iconFg="#1F7A5C"
-          label={`Investment gain · ${horizon}M`}
+          label={`Lãi tài sản · ${horizon}M`}
           value={`${r.investGain >= 0 ? "+" : "−"}${fmt(Math.abs(r.investGain))}`}
-          hint={`Phần tăng nhờ lãi tài sản (ngoài tiết kiệm)`}
+          hint={`Phần tăng nhờ lãi (ngoài tiết kiệm) · tiết kiệm ròng ${full(r.totalIncome - r.totalExpense)}`}
           valueColor="#1F7A5C"
         />
       </div>
+
+      {/* Lãi/lỗ chưa hiện thực theo nhóm (point-in-time, hôm nay) */}
+      {investGainGroups.some((g) => g.gain !== 0) && (
+        <div className="bg-card border border-card-border rounded-[18px] p-[18px]">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+                <i className="ph-duotone ph-chart-pie-slice" aria-hidden />
+              </div>
+              <div className="text-[15px] font-bold">Lãi/lỗ chưa hiện thực theo nhóm</div>
+              <span className="text-[11px] text-muted hidden sm:inline">· tại hôm nay</span>
+            </div>
+            <div className="text-[13px]">
+              <span className="text-muted">Tổng </span>
+              <span className="font-extrabold tnum" style={{ color: investGainTotal >= 0 ? "#1F7A5C" : "#B4573B" }} title={full(investGainTotal)}>
+                {investGainTotal >= 0 ? "+" : "−"}{fmt(Math.abs(investGainTotal))}
+              </span>
+            </div>
+          </div>
+          <div className="grid gap-[12px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+            {investGainGroups.map((g) => {
+              const share = investGainTotal !== 0 ? Math.abs(g.gain / investGainTotal) * 100 : 0;
+              const up = g.gain >= 0;
+              return (
+                <div key={g.key} className="border border-[#EFEAE0] rounded-[14px] p-4" title={`${g.label}: ${full(g.gain)}`}>
+                  <div className="flex items-center gap-[9px]">
+                    <div className="w-[11px] h-[11px] rounded-[3px]" style={{ background: groupColor[g.key] }} />
+                    <div className="text-[13px] font-bold flex-1">{g.label}</div>
+                  </div>
+                  <div className="text-[20px] font-extrabold my-[8px] tnum" style={{ color: up ? "#1F7A5C" : "#B4573B" }} title={full(g.gain)}>
+                    {up ? "+" : "−"}{fmt(Math.abs(g.gain))}
+                  </div>
+                  <div className="h-[7px] rounded-full bg-[#EFEAE0] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${share}%`, background: groupColor[g.key] }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Giả định kế hoạch — thanh nút nhỏ phía trên (mở modal) */}
       <button
@@ -194,13 +279,35 @@ export function ForecastClient({
             <span className="text-[11px] font-bold text-primary bg-[#EAF4EE] rounded-full px-[10px] py-[3px]">
               {scenarioLabel(scenario)}
             </span>
+            <span
+              className="text-[11px] font-bold rounded-full px-[10px] py-[3px] flex items-center gap-[4px]"
+              style={
+                start.anchoredToSnapshot
+                  ? { color: "#1F7A5C", background: "#DFF2E7" }
+                  : { color: "#A5731F", background: "#FBF0DC" }
+              }
+              title={
+                start.anchoredToSnapshot
+                  ? `Điểm xuất phát là net worth THỰC của tháng đã chốt ${start.baselineMonthKey}`
+                  : "Chưa chốt tháng nào — xuất phát từ net worth hiện tại (live) + receivables về tháng 1"
+              }
+            >
+              <i className={`ph-duotone ${start.anchoredToSnapshot ? "ph-anchor-simple" : "ph-broadcast"}`} aria-hidden />
+              {start.anchoredToSnapshot ? `Neo ${start.baselineMonthKey} (thực)` : "Live"}
+            </span>
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-muted">
+          <div className="flex items-center gap-3 text-[11px] text-muted flex-wrap">
             {r.goalTarget > 0 && (
               <span className="flex items-center gap-[5px]">
                 <span className="w-[14px] h-0 border-t-2 border-dashed" style={{ borderColor: "#A5731F" }} />
                 Mục tiêu {fmt(r.goalTarget)}
               </span>
+            )}
+            {cone.length >= 2 && (
+              <label className="flex items-center gap-[5px] cursor-pointer select-none">
+                <input type="checkbox" checked={showCone} onChange={(e) => setShowCone(e.target.checked)} />
+                Dải scenario
+              </label>
             )}
             {snapInRange.length > 0 && (
               <label className="flex items-center gap-[5px] cursor-pointer select-none">
@@ -220,6 +327,8 @@ export function ForecastClient({
           receivablesLandFirstMonth={params.receivablesLandFirstMonth}
           snapshots={snapshots}
           showActual={showActual}
+          coneSeries={showCone ? cone : []}
+          actualLine={showActual ? actualLine : null}
         />
         {r.goalTarget > 0 && (
           <div
@@ -259,27 +368,192 @@ export function ForecastClient({
             )}
           </div>
         )}
+
+        {/* Goal insight — khoảng cách · cần tiết kiệm/tháng · ETA từng scenario */}
+        {goalPlan && (
+          <div className="mt-3 grid gap-[10px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
+            <GoalTile
+              label={`Còn thiếu tới mục tiêu`}
+              value={goalPlan.distance > 0 ? fmt(goalPlan.distance) : "Đã đủ"}
+              hint={goalPlan.distance > 0 ? `Cần thêm ${full(goalPlan.distance)} so với hôm nay` : "Net worth hiện tại đã đạt mục tiêu"}
+              tone={goalPlan.distance > 0 ? "warn" : "good"}
+            />
+            {goalPlan.monthsToDeadline > 0 && (
+              <GoalTile
+                label={`Cần tiết kiệm / tháng`}
+                value={`${fmt(goalPlan.requiredMonthlySaving)}`}
+                hint={`Để chạm ${full(goalPlan.target)} trong ${goalPlan.monthsToDeadline} tháng (tới hết ${params.houseGoal.target_year}) — chưa tính lãi`}
+                tone="neutral"
+              />
+            )}
+            <GoalTile
+              label="Scenario đạt sớm nhất"
+              value={goalPlan.onTrackScenario ? scenarioLabel(goalPlan.onTrackScenario) : "Không (trong 10 năm)"}
+              hint={
+                goalPlan.onTrackScenario
+                  ? `Kịch bản '${scenarioLabel(goalPlan.onTrackScenario)}' chạm mục tiêu ~ ${goalPlan.etaByScenario[goalPlan.onTrackScenario]}`
+                  : "Không kịch bản nào đạt trong 120 tháng — tăng tiết kiệm hoặc lợi suất"
+              }
+              tone={goalPlan.onTrackScenario ? "good" : "warn"}
+            />
+          </div>
+        )}
+
+        {/* ETA chi tiết từng scenario */}
+        {goalPlan && scenarioKeys.length > 1 && (
+          <div className="mt-2 flex flex-wrap gap-[8px]">
+            {scenarioKeys.map((k) => {
+              const eta = goalPlan.etaByScenario[k];
+              const active = k === scenario;
+              return (
+                <button
+                  key={k}
+                  onClick={() => setScenario(k)}
+                  className="flex items-center gap-[6px] rounded-full px-[12px] py-[6px] text-[11px] font-bold border cursor-pointer transition-colors"
+                  style={{
+                    background: active ? "#EAF4EE" : "#FFFFFF",
+                    borderColor: active ? "#17554A" : "#E7E1D3",
+                    color: eta ? "#1F7A5C" : "#9AA49E",
+                  }}
+                  title={`Scenario ${scenarioLabel(k)}: ${eta ? `đạt ~ ${eta}` : "không đạt trong 120 tháng"}`}
+                >
+                  <i className={`ph-duotone ${eta ? "ph-flag-checkered" : "ph-flag"}`} aria-hidden />
+                  {scenarioLabel(k)}: {eta ?? "—"}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Cột phải — Asset-class growth (multi-line, giống Revenue by source) */}
       <div className="bg-card border border-card-border rounded-[18px] p-[18px] flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-1">
           <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
             <i className="ph-duotone ph-chart-donut" aria-hidden />
           </div>
           <div className="text-[15px] font-bold">Asset-class growth · {horizon}M</div>
         </div>
+        {/* disclaimer: các đường độc lập, KHÔNG phải phân rã của headline */}
+        <div className="text-[11px] text-muted mb-3 leading-[1.4]">
+          Mỗi nhóm tăng theo lợi suất giả định riêng — <b>độc lập</b>, không phải phân rã của đường net worth.
+        </div>
         {groupSeries.length === 0 ? (
           <div className="flex-1 flex items-center justify-center text-[13px] text-faint">Chưa có tài sản.</div>
         ) : (
-          <LineChart
-            labels={r.monthKeys}
-            series={groupSeries}
-            height={260}
-            ariaLabel="Tăng trưởng từng nhóm tài sản qua từng tháng"
-          />
+          <>
+            <LineChart
+              labels={r.monthKeys}
+              series={groupSeries}
+              height={230}
+              ariaLabel="Tăng trưởng từng nhóm tài sản qua từng tháng"
+            />
+            {/* growthPct từng nhóm (đang có sẵn trong engine, trước đây không hiển thị) */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11px]">
+              {r.groups
+                .filter((g) => g.series[g.series.length - 1] > 0)
+                .map((g) => (
+                  <span key={g.key} className="flex items-center gap-[5px] text-muted">
+                    <span className="w-[9px] h-[9px] rounded-[2px]" style={{ background: groupColor[g.key] }} />
+                    {g.label}{" "}
+                    <b style={{ color: g.growthPct >= 0 ? "#1F7A5C" : "#B4573B" }}>
+                      {g.growthPct >= 0 ? "+" : ""}
+                      {g.growthPct.toFixed(1)}%
+                    </b>
+                  </span>
+                ))}
+            </div>
+          </>
         )}
       </div>
+      </div>
+
+      {/* Waterfall dòng tiền/tháng + Độ nhạy lợi suất — 2 cột */}
+      <div className="grid gap-[14px] grid-cols-1 lg:grid-cols-2">
+        {/* B2 — Waterfall: opening → +tiết kiệm → +lãi → closing của tháng chọn */}
+        <div className="bg-card border border-card-border rounded-[18px] p-[18px]">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+                <i className="ph-duotone ph-flow-arrow" aria-hidden />
+              </div>
+              <div className="text-[15px] font-bold">Dòng tiền tháng dự phóng</div>
+            </div>
+            {r.months.length > 0 && (
+              <select
+                value={wfIdx ?? r.months.length - 1}
+                onChange={(e) => setWfIdx(Number(e.target.value))}
+                className="bg-fill-soft border border-card-border rounded-full px-[13px] py-[7px] text-[12px] font-bold text-ink-soft cursor-pointer"
+                aria-label="Chọn tháng"
+              >
+                {r.months.map((m, i) => (
+                  <option key={m.monthKey} value={i}>
+                    {m.monthKey}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          {wfSteps.length > 0 ? (
+            <>
+              <WaterfallChart steps={wfSteps} height={230} />
+              <div className="text-[11px] text-muted mt-2">
+                Mở đầu {fmt(wfMonth!.opening)} → tiết kiệm{" "}
+                <b className="text-[#1F7A5C]">+{fmt(wfMonth!.savings)}</b> → lãi{" "}
+                <b className="text-[#1F7A5C]">+{fmt(wfMonth!.return_)}</b> → đóng{" "}
+                <b>{fmt(wfMonth!.closing)}</b>.
+              </div>
+            </>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center text-[13px] text-faint">Chưa có dữ liệu.</div>
+          )}
+        </div>
+
+        {/* B3 — Độ nhạy lợi suất: dịch annual_return quanh scenario, xem NW cuối kỳ đổi bao nhiêu */}
+        <div className="bg-card border border-card-border rounded-[18px] p-[18px]">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-[30px] h-[30px] rounded-[9px] bg-chip text-primary flex items-center justify-center text-[15px]">
+              <i className="ph-duotone ph-scales" aria-hidden />
+            </div>
+            <div className="text-[15px] font-bold">Độ nhạy lợi suất · {horizon}M</div>
+          </div>
+          <div className="text-[11px] text-muted mb-3 leading-[1.4]">
+            Giữ nguyên kế hoạch thu/chi, chỉ đổi lợi suất năm quanh <b>{scenarioLabel(scenario)}</b> → net worth cuối kỳ.
+          </div>
+          <div className="flex flex-col">
+            {sensitivity.map((s) => {
+              const isBase = Math.abs(s.deltaReturn) < 1e-9;
+              const up = s.vsBase >= 0;
+              return (
+                <div
+                  key={s.deltaReturn}
+                  className="grid items-center gap-2 py-[9px] border-t border-divider text-[12.5px] tnum first:border-t-0"
+                  style={{ gridTemplateColumns: "78px 1fr 110px", background: isBase ? "#F7F4EC" : undefined }}
+                >
+                  <div className="font-bold" style={{ color: isBase ? "#17554A" : "#4C5A54" }}>
+                    {(s.annualReturn * 100).toFixed(0)}%/năm
+                  </div>
+                  <div className="font-extrabold" title={full(s.endTotal)}>
+                    {fmt(s.endTotal)}
+                  </div>
+                  <div className="text-right">
+                    {isBase ? (
+                      <span className="text-[11px] font-bold text-muted">gốc</span>
+                    ) : (
+                      <span
+                        className="text-[11px] font-extrabold rounded-full px-2 py-[3px]"
+                        style={{ background: up ? "#DFF2E7" : "#F7E3DC", color: up ? "#1F7A5C" : "#B4573B" }}
+                      >
+                        {up ? "+" : "−"}
+                        {fmt(Math.abs(s.vsBase))}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <Modal
@@ -353,14 +627,8 @@ export function ForecastClient({
           ))}
         </div>
 
-        {/* Multi-line theo tháng — hover tooltip + crosshair + toggle line/bar + legend */}
-        <div className="mt-6">
-          <LineChart
-            labels={revenueLabels}
-            series={revenueSeries}
-            height={280}
-            ariaLabel="Doanh thu theo nguồn qua từng tháng"
-          />
+        <div className="mt-4 text-[11px] text-muted leading-[1.5] border-t border-divider pt-3">
+          Kế hoạch thu giả định <b>đều mỗi tháng</b> nên tỉ trọng giữ nguyên suốt kỳ — chỉnh ở “Giả định kế hoạch”.
         </div>
       </div>
 
@@ -371,7 +639,7 @@ export function ForecastClient({
           <div style={{ minWidth: 920 }}>
             <div
               className="grid gap-2 items-center px-[22px] py-3 bg-fill-soft text-[11px] font-bold text-muted uppercase tracking-[0.4px] sticky top-0 z-10"
-              style={{ gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 1.15fr 92px` }}
+              style={{ gridTemplateColumns: `64px repeat(${r.sources.length},1fr) 1.05fr 0.95fr 1.05fr 0.9fr 1.15fr 92px` }}
             >
               <div>Month</div>
               {r.sources.map((s) => (
@@ -382,6 +650,7 @@ export function ForecastClient({
               <div className="text-right">Income</div>
               <div className="text-right">Expenses</div>
               <div className="text-right">Net</div>
+              <div className="text-right">Lãi</div>
               <div className="text-right">Net worth</div>
               <div className="text-right">MoM</div>
             </div>
@@ -404,6 +673,7 @@ export function ForecastClient({
                 <div className="text-right font-bold">{fmt(m.income)}</div>
                 <div className="text-right text-[#B4573B]">−{fmt(m.expense)}</div>
                 <div className="text-right font-bold text-[#1F7A5C]">+{fmt(m.net)}</div>
+                <div className="text-right text-[#1F7A5C]" title={full(m.return_)}>+{fmt(m.return_)}</div>
                 <div className="text-right font-extrabold">{fmt(m.netWorth)}</div>
                 <div className="text-right">
                   <span
@@ -493,6 +763,32 @@ function AssumptionInput({
       />
       <span className="text-[11px] text-muted">{saving ? "Đang lưu…" : full(value) + "/tháng"}</span>
     </label>
+  );
+}
+
+function GoalTile({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone: "good" | "warn" | "neutral";
+}) {
+  const c =
+    tone === "good"
+      ? { bg: "#DFF2E7", fg: "#1F7A5C" }
+      : tone === "warn"
+      ? { bg: "#FBF0DC", fg: "#A5731F" }
+      : { bg: "#EAF4EE", fg: "#17554A" };
+  return (
+    <div className="rounded-[14px] p-4" style={{ background: c.bg }} title={hint}>
+      <div className="text-[11px] font-bold" style={{ color: c.fg }}>{label}</div>
+      <div className="text-[19px] font-extrabold mt-[6px] tnum" style={{ color: c.fg }}>{value}</div>
+      <div className="text-[11px] mt-[4px] leading-[1.4]" style={{ color: c.fg, opacity: 0.85 }}>{hint}</div>
+    </div>
   );
 }
 

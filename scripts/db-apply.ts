@@ -25,6 +25,7 @@ const FILES = [
   "06_rpc_p2.sql",
   "07_views_p3.sql",
   "08_rpc_p3.sql",
+  "09_views_history.sql",
 ];
 
 async function main() {

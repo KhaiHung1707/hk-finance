@@ -11,6 +11,7 @@ export type UpworkContract = {
   status: "draft" | "active" | "billed" | "received" | "cancelled";
   fx_rate: number | null;
   amount_vnd: number | null;
+  expected_on: string | null; // S-1: ngày dự kiến bill/thu (cho Calendar)
   billed_on: string | null;
   received_on: string | null;
 };
@@ -30,6 +31,7 @@ export async function getUpworkContracts(): Promise<UpworkContract[]> {
     status: r.status,
     fx_rate: r.fx_rate === null ? null : Number(r.fx_rate),
     amount_vnd: r.amount_vnd === null ? null : Number(r.amount_vnd),
+    expected_on: r.expected_on ?? null,
     billed_on: r.billed_on ?? null,
     received_on: r.received_on ?? null,
   }));

@@ -282,6 +282,22 @@ begin
   update month_keys set closed_at = now() where key = p_month_key;
 end $$;
 
+-- ---------- set_forecast_baseline (backtest kế hoạch vs thực tế) -------------
+-- Ghi NW headline DỰ PHÓNG cho tháng đã chốt. Engine dự phóng là TypeScript thuần
+-- (lib/forecast.ts) → action tính rồi truyền số vào đây; RPC chỉ UPDATE (không nhân
+-- đôi công thức trong SQL). Gọi SAU close_month (row snapshot phải tồn tại trước).
+-- Idempotent: UPDATE theo PK, chốt lại ghi đè baseline mới.
+create or replace function set_forecast_baseline(
+  p_month_key text, p_forecast_total bigint, p_forecast_scenario text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update net_worth_snapshots
+     set forecast_total    = p_forecast_total,
+         forecast_scenario = p_forecast_scenario,
+         forecast_taken_at = now()
+   where month_key = p_month_key;
+end $$;
+
 -- ---------- reopen_month (rollback nếu lỡ chốt nhầm) -------------------------
 -- Mở lại tháng đã chốt: gỡ khoá + đánh dấu is_reopened (giữ dấu vết). Snapshot giữ
 -- nguyên để tham chiếu; chốt lại sẽ ghi đè.

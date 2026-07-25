@@ -20,6 +20,10 @@ export function NetWorthChart({
   receivablesLandFirstMonth = false,
   snapshots = [],
   showActual = true,
+  // cone: các đường headline theo scenario (min/max mỗi cột → band mờ). index-căn theo nwSeries.
+  coneSeries = [],
+  // đường "số thực tế" liền (từ snapshot đã chốt, căn theo monthKeys). Vẽ nét đứt xanh lá.
+  actualLine = null,
   // tỉ lệ khung (rộng:cao). Chart cao theo bề rộng thật → responsive, không méo.
   aspect = 2.6,
   minHeight = 170,
@@ -34,6 +38,8 @@ export function NetWorthChart({
   receivablesLandFirstMonth?: boolean;
   snapshots?: ForecastSnapshot[];
   showActual?: boolean;
+  coneSeries?: number[][];
+  actualLine?: (number | null)[] | null;
   aspect?: number;
   minHeight?: number;
   maxHeight?: number;
@@ -45,8 +51,21 @@ export function NetWorthChart({
   const H = 200;
 
   const snapInRange = snapshots.filter((s) => monthKeys.includes(s.month_key));
+
+  // Cone band: tại mỗi cột i, min/max qua các scenario → dựng vùng mờ.
+  const coneN = nwSeries.length;
+  const coneBand = coneSeries.length >= 2
+    ? Array.from({ length: coneN }, (_, i) => {
+        const col = coneSeries.map((s) => s[i]).filter((v) => Number.isFinite(v));
+        return col.length ? { lo: Math.min(...col), hi: Math.max(...col) } : { lo: nwSeries[i], hi: nwSeries[i] };
+      })
+    : null;
+
+  const actualVals = (actualLine ?? []).filter((v): v is number => v != null);
   const yVals = [
     ...nwSeries,
+    ...(coneBand ? coneBand.flatMap((b) => [b.lo, b.hi]) : []),
+    ...actualVals,
     ...(goalTarget > 0 ? [goalTarget] : []),
     ...(showActual ? snapInRange.map((s) => s.total) : []),
   ];
@@ -113,12 +132,41 @@ export function NetWorthChart({
         })}
         <polygon points={area} fill="#EAF4EE" />
 
+        {/* Cone band (min→max qua các scenario): mép trên đi tới, mép dưới quay về */}
+        {coneBand && (
+          <polygon
+            points={
+              coneBand.map((b, i) => `${X(i).toFixed(1)},${Y(b.hi).toFixed(1)}`).join(" ") +
+              " " +
+              coneBand.map((b, i) => `${X(coneN - 1 - i).toFixed(1)},${Y(coneBand[coneN - 1 - i].lo).toFixed(1)}`).join(" ")
+            }
+            fill="#17554A"
+            opacity={0.08}
+          />
+        )}
+
         {/* Đường mục tiêu nhà */}
         {goalTarget > 0 && goalTarget >= min && goalTarget <= max && (
           <line x1={46} y1={Y(goalTarget)} x2={W} y2={Y(goalTarget)} stroke="#A5731F" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
         )}
 
         <polyline points={line} fill="none" stroke="#17554A" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" filter="url(#nwglow)" />
+
+        {/* Đường "số thực tế" (snapshot đã chốt) — nét đứt xanh lá, chỉ nối các điểm có giá trị */}
+        {actualLine && (
+          <polyline
+            points={actualLine
+              .map((v, i) => (v == null ? null : `${X(i).toFixed(1)},${Y(v).toFixed(1)}`))
+              .filter(Boolean)
+              .join(" ")}
+            fill="none"
+            stroke="#1F7A5C"
+            strokeWidth={2}
+            strokeDasharray="5 3"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
 
         {/* Receivables marker */}
         {showReceivables && <circle cx={X(1)} cy={Y(nwSeries[1])} r={4.5} fill="#E8C97A" stroke="#FFFFFF" strokeWidth={2} />}

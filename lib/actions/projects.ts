@@ -6,7 +6,22 @@ import { positive, nonNegative, nonEmpty, guard } from "@/lib/validate";
 function rev() {
   revalidatePath("/projects");
   revalidatePath("/ledger");
+  revalidatePath("/calendar");
   revalidatePath("/");
+}
+
+/** Ngày DỰ KIẾN bill/thu của milestone (S-1) — metadata cho Calendar, không đụng tiền. */
+export async function setMilestoneDueOn(id: string, dueOn: string | null) {
+  return guard(async () => {
+    const sb = await createClient();
+    const { error } = await sb
+      .from("milestones")
+      .update({ due_on: dueOn || null })
+      .eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
 }
 
 export async function createProject(input: {

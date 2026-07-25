@@ -6,6 +6,7 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { DueDateButton } from "@/components/ui/DueDateButton";
 import {
   createProject,
   updateProject,
@@ -16,6 +17,7 @@ import {
   billMilestone,
   collectMilestone,
   cancelMilestone,
+  setMilestoneDueOn,
 } from "@/lib/actions/projects";
 import { rollbackStatus } from "@/lib/actions/ledger";
 import type { ProjectFinance, Milestone } from "@/lib/queries/projects";
@@ -263,8 +265,14 @@ export function ProjectsClient({
                         {(m.received_on || m.billed_on) && (
                           <span className="text-faint"> · {m.received_on ?? m.billed_on}</span>
                         )}
+                        {!m.received_on && !m.billed_on && m.due_on && (
+                          <span className="text-[#A5731F]"> · dự kiến {m.due_on}</span>
+                        )}
                       </div>
                     </div>
+                    {(m.status === "draft" || m.status === "billed") && (
+                      <DueDateButton value={m.due_on} onSave={(d) => doAction(() => setMilestoneDueOn(m.id, d))} />
+                    )}
                     {m.status === "draft" && (
                       <button
                         onClick={() => doAction(() => billMilestone(m.id, monthKey))}

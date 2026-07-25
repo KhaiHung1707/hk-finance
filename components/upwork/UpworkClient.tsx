@@ -6,7 +6,8 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
-import { createContract, updateContract, activateContract, billContract, receiveContract, cancelContract } from "@/lib/actions/upwork";
+import { createContract, updateContract, activateContract, billContract, receiveContract, cancelContract, setContractExpectedOn } from "@/lib/actions/upwork";
+import { DueDateButton } from "@/components/ui/DueDateButton";
 import { rollbackStatus } from "@/lib/actions/ledger";
 import type { UpworkContract } from "@/lib/queries/upwork";
 import type { Ref } from "@/lib/queries";
@@ -173,6 +174,9 @@ export function UpworkClient({
                     <div className="text-[10px] text-faint">
                       {locked ? `@ ${new Intl.NumberFormat("en-US").format(c.fx_rate ?? 0)}` : "ước tính"}
                       {(c.received_on || c.billed_on) && ` · ${c.received_on ?? c.billed_on}`}
+                      {!c.received_on && !c.billed_on && c.expected_on && (
+                        <span className="text-[#A5731F]"> · dự kiến {c.expected_on}</span>
+                      )}
                     </div>
                   </>
                 )}
@@ -182,7 +186,10 @@ export function UpworkClient({
                   {sm.label}
                 </Badge>
               </div>
-              <div className="flex justify-end gap-[6px]">
+              <div className="flex justify-end gap-[6px] items-center">
+                {(c.status === "draft" || c.status === "active" || c.status === "billed") && (
+                  <DueDateButton value={c.expected_on} onSave={(d) => doAction(() => setContractExpectedOn(c.id, d))} size={30} />
+                )}
                 {(c.status === "draft" || c.status === "active") && (
                   <button
                     onClick={() => openEdit(c)}

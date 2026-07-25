@@ -263,6 +263,204 @@ export async function getClosedMonths(): Promise<ClosedMonth[]> {
   }));
 }
 
+// ---- History analytics (v_networth_history / v_networth_deltas) ----
+
+export type NetworthHistoryRow = {
+  month_key: string;
+  sort: number;
+  as_of_date: string | null;
+  cash: number;
+  gold: number;
+  stock: number;
+  deposits: number;
+  total: number;
+  income_recognized: number;
+  income_received: number;
+  expense: number;
+  net: number;
+  savings_rate: number;
+  is_reopened: boolean;
+};
+
+export type NetworthDeltaRow = {
+  month_key: string;
+  sort: number;
+  total: number;
+  opening: number | null; // null ở tháng đầu (không có tháng trước)
+  income_received: number;
+  expense: number;
+  invest_and_reval: number | null; // residual: lãi đầu tư + định giá lại + lệch thời điểm
+  d_cash: number | null;
+  d_gold: number | null;
+  d_stock: number | null;
+  d_deposits: number | null;
+};
+
+/** Lịch sử net-worth theo tháng đã chốt (cũ → mới theo sort). Cho History-analytics. */
+export async function getNetworthHistory(): Promise<NetworthHistoryRow[]> {
+  const sb = await createClient();
+  const { data, error } = await sb.from("v_networth_history").select("*").order("sort");
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    month_key: r.month_key,
+    sort: Number(r.sort),
+    as_of_date: r.as_of_date ?? null,
+    cash: Number(r.cash),
+    gold: Number(r.gold),
+    stock: Number(r.stock),
+    deposits: Number(r.deposits),
+    total: Number(r.total),
+    income_recognized: Number(r.income_recognized),
+    income_received: Number(r.income_received),
+    expense: Number(r.expense),
+    net: Number(r.net),
+    savings_rate: Number(r.savings_rate),
+    is_reopened: !!r.is_reopened,
+  }));
+}
+
+export type MonthlyTrendRow = {
+  month_key: string;
+  sort: number;
+  recognized: number;
+  received: number;
+  pending: number;
+  expense: number;
+  net: number;
+  savings_rate: number;
+};
+
+/**
+ * Dòng tiền MỌI tháng (kể cả chưa chốt) từ v_monthly_summary, cũ → mới.
+ * Fallback cho History-analytics khi chưa có snapshot nào (dữ liệu "tạm tính").
+ * Lọc bỏ tháng hoàn toàn rỗng (không thu/chi) để trend không kéo dài vô nghĩa.
+ */
+export async function getMonthlyTrend(): Promise<MonthlyTrendRow[]> {
+  const sb = await createClient();
+  const { data, error } = await sb.from("v_monthly_summary").select("*").order("sort");
+  if (error) throw error;
+  return (data ?? [])
+    .map((r) => ({
+      month_key: r.month_key,
+      sort: Number(r.sort),
+      recognized: Number(r.recognized),
+      received: Number(r.received),
+      pending: Number(r.pending),
+      expense: Number(r.expense),
+      net: Number(r.net),
+      savings_rate: Number(r.savings_rate),
+    }))
+    .filter((r) => r.recognized !== 0 || r.expense !== 0);
+}
+
+/**
+ * Thu nhận theo nguồn × tháng (cho stacked area). Chưa zero-fill & chưa sort theo
+ * thứ tự tháng (view chỉ có month_key text) — client bù ô thiếu và xếp tháng theo
+ * thứ tự lấy từ getMonthlyTrend()/getNetworthHistory() (đã sort đúng theo month_keys.sort).
+ */
+export async function getSourceTrend(): Promise<
+  { month_key: string; source: string; source_sort: number; recognized: number }[]
+> {
+  const sb = await createClient();
+  const { data, error } = await sb
+    .from("v_monthly_by_source")
+    .select("month_key, source, source_sort, recognized")
+    .order("source_sort");
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    month_key: r.month_key,
+    source: r.source,
+    source_sort: Number(r.source_sort),
+    recognized: Number(r.recognized),
+  }));
+}
+
+/** Biến động opening→closing + Δ từng nhóm mỗi tháng (cho waterfall). Cũ → mới. */
+export async function getNetworthDeltas(): Promise<NetworthDeltaRow[]> {
+  const sb = await createClient();
+  const { data, error } = await sb.from("v_networth_deltas").select("*").order("sort");
+  if (error) throw error;
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  return (data ?? []).map((r) => ({
+    month_key: r.month_key,
+    sort: Number(r.sort),
+    total: Number(r.total),
+    opening: num(r.opening),
+    income_received: Number(r.income_received),
+    expense: Number(r.expense),
+    invest_and_reval: num(r.invest_and_reval),
+    d_cash: num(r.d_cash),
+    d_gold: num(r.d_gold),
+    d_stock: num(r.d_stock),
+    d_deposits: num(r.d_deposits),
+  }));
+}
+
+// ---- Backtest kế hoạch vs thực tế (v_forecast_error) ----
+
+export type ForecastErrorRow = {
+  month_key: string;
+  sort: number;
+  actual_total: number;
+  forecast_total: number | null; // null = tháng không có baseline (tháng đầu)
+  forecast_scenario: string | null;
+  error_abs: number | null; // actual − forecast (dương = thực tế vượt kế hoạch)
+  error_pct: number | null; // % lệch so với dự phóng
+};
+
+/** Sai số dự phóng theo tháng đã chốt (backtest). Cũ → mới theo sort. */
+export async function getForecastError(): Promise<ForecastErrorRow[]> {
+  const sb = await createClient();
+  const { data, error } = await sb.from("v_forecast_error").select("*").order("sort");
+  if (error) throw error;
+  const num = (v: unknown) => (v == null ? null : Number(v));
+  return (data ?? []).map((r) => ({
+    month_key: r.month_key,
+    sort: Number(r.sort),
+    actual_total: Number(r.actual_total),
+    forecast_total: num(r.forecast_total),
+    forecast_scenario: r.forecast_scenario ?? null,
+    error_abs: num(r.error_abs),
+    error_pct: num(r.error_pct),
+  }));
+}
+
+export type PrevSnapshot = {
+  month_key: string;
+  cash: number;
+  gold: number;
+  stock: number;
+  deposits: number;
+  total: number;
+};
+
+/**
+ * Snapshot đã chốt LIỀN TRƯỚC một tháng (sort < sort(monthKey), lớn nhất). Dùng làm
+ * điểm xuất phát khi tính forecast baseline lúc chốt. null nếu chưa có tháng nào trước.
+ */
+export async function getPrevSnapshotStart(monthKey: string): Promise<PrevSnapshot | null> {
+  const sb = await createClient();
+  const { data: mk, error: e1 } = await sb.from("month_keys").select("sort").eq("key", monthKey).single();
+  if (e1 || !mk) return null;
+  const { data, error } = await sb
+    .from("net_worth_snapshots")
+    .select("month_key, cash, gold, stock, deposits, total, mk:month_keys!inner(sort)")
+    .lt("month_keys.sort", Number(mk.sort))
+    .order("sort", { referencedTable: "month_keys", ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const r = (data ?? [])[0];
+  if (!r) return null;
+  return {
+    month_key: r.month_key,
+    cash: Number(r.cash),
+    gold: Number(r.gold),
+    stock: Number(r.stock),
+    deposits: Number(r.deposits),
+    total: Number(r.total),
+  };
+}
+
 /** Trạng thái chốt của 1 tháng: đã đóng chưa + thời điểm chốt + snapshot as-of. */
 export async function getMonthCloseStatus(monthKey: string): Promise<MonthCloseStatus> {
   const sb = await createClient();

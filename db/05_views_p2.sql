@@ -53,7 +53,8 @@ select
   u.amount_vnd,
   u.income_tx_id,
   u.billed_on,
-  u.received_on
+  u.received_on,
+  u.expected_on
 from upwork_contracts u;
 
 -- ---------- Projects: finance per project ------------------------------------

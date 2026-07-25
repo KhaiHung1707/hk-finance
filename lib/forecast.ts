@@ -60,6 +60,105 @@ export type ForecastResult = {
   goalTarget: number; // down_payment (0 = không đặt mục tiêu)
 };
 
+/** Số tháng từ baseline (VD 'T7/26') tới hết tháng 12 của target_year (VD 2028). */
+export function monthsUntilYearEnd(baselineMonthKey: string, targetYear: number): number {
+  const month = Number(baselineMonthKey.replace("T", "").split("/")[0]);
+  const year = 2000 + Number(baselineMonthKey.split("/")[1]);
+  if (!targetYear || targetYear < year) return 0;
+  return (targetYear - year) * 12 + (12 - month);
+}
+
+export type GoalPlan = {
+  target: number;
+  distance: number; // target − startTotal (0 nếu đã đạt)
+  monthsToDeadline: number; // tới Dec(target_year)
+  requiredMonthlySaving: number; // để chạm target đúng hạn (bỏ qua lãi — cận trên an toàn)
+  onTrackScenario: string | null; // scenario đầu tiên đạt goal trong horizon
+  etaByScenario: Record<string, string | null>; // tháng đạt goal / null nếu không đạt trong horizon
+};
+
+/**
+ * Kế hoạch mục tiêu (thuần). requiredMonthlySaving = distance / monthsToDeadline
+ * (không tính lãi → cận trên, an toàn để "cần tối thiểu chừng này"). ETA từng scenario
+ * chạy engine tới `etaHorizon` tháng, lấy tháng đầu tiên headline ≥ target.
+ */
+export function computeGoalPlan(
+  params: ForecastParams,
+  start: ForecastStart,
+  target: number,
+  targetYear: number,
+  etaHorizon = 120
+): GoalPlan {
+  const startTotal = start.cash + start.gold + start.stock + start.deposits;
+  const distance = Math.max(0, target - startTotal);
+  const monthsToDeadline = monthsUntilYearEnd(start.baselineMonthKey, targetYear);
+  const requiredMonthlySaving = monthsToDeadline > 0 ? distance / monthsToDeadline : 0;
+
+  const etaByScenario: Record<string, string | null> = {};
+  let onTrackScenario: string | null = null;
+  for (const key of Object.keys(params.scenarios)) {
+    const r = runForecast(params, start, key, etaHorizon);
+    etaByScenario[key] = r.goalReachedAt;
+    if (onTrackScenario === null && r.goalReachedAt !== null) onTrackScenario = key;
+  }
+
+  return { target, distance, monthsToDeadline, requiredMonthlySaving, onTrackScenario, etaByScenario };
+}
+
+/** Cone dự phóng: mỗi scenario → 1 đường headline (nwSeries) cùng horizon. */
+export function computeScenarioCone(
+  params: ForecastParams,
+  start: ForecastStart,
+  horizon: number
+): { key: string; series: number[] }[] {
+  return Object.keys(params.scenarios).map((key) => ({
+    key,
+    series: runForecast(params, start, key, horizon).nwSeries,
+  }));
+}
+
+export type SensitivityRow = {
+  deltaReturn: number; // độ lệch annual_return so với scenario gốc (vd −0.02, 0, +0.02)
+  annualReturn: number; // lợi suất tuyệt đối của dòng này
+  endTotal: number; // NW cuối horizon
+  vsBase: number; // chênh so với dòng gốc (deltaReturn=0)
+  goalReachedAt: string | null;
+};
+
+/**
+ * Độ nhạy theo lợi suất: giữ nguyên plan + scenario income_pct, chỉ dịch annual_return
+ * quanh giá trị gốc theo `deltas` (vd [−0.02,−0.01,0,+0.01,+0.02]). Trả NW cuối horizon
+ * mỗi mức + chênh so với mức gốc → trả lời "±1% lợi suất đổi net worth bao nhiêu".
+ */
+export function computeSensitivity(
+  params: ForecastParams,
+  start: ForecastStart,
+  scenarioKey: string,
+  horizon: number,
+  deltas: number[] = [-0.02, -0.01, 0, 0.01, 0.02]
+): SensitivityRow[] {
+  const base = params.scenarios[scenarioKey] ?? { income_pct: 1, annual_return: 0.08 };
+  const run = (annualReturn: number) => {
+    const p: ForecastParams = {
+      ...params,
+      scenarios: { ...params.scenarios, [scenarioKey]: { ...base, annual_return: annualReturn } },
+    };
+    return runForecast(p, start, scenarioKey, horizon);
+  };
+  const baseEnd = run(base.annual_return).endTotal;
+  return deltas.map((d) => {
+    const annualReturn = base.annual_return + d;
+    const r = run(annualReturn);
+    return {
+      deltaReturn: d,
+      annualReturn,
+      endTotal: r.endTotal,
+      vsBase: r.endTotal - baseEnd,
+      goalReachedAt: r.goalReachedAt,
+    };
+  });
+}
+
 /** T7/26 + i tháng → 'T8/26'... */
 function shiftMonthKey(baseline: string, i: number): string {
   const month = Number(baseline.replace("T", "").split("/")[0]);

@@ -97,5 +97,6 @@ export const navItems = [
   { href: "/projects", label: "Projects/Upwork", icon: "ph-duotone ph-briefcase" },
   { href: "/investments", label: "Invest", icon: "ph-duotone ph-chart-line-up" },
   { href: "/forecast", label: "Forecast", icon: "ph-duotone ph-chart-line" },
+  { href: "/calendar", label: "Lịch", icon: "ph-duotone ph-calendar-dots" },
   { href: "/history", label: "Lịch sử", icon: "ph-duotone ph-clock-counter-clockwise" },
 ] as const;

@@ -1,15 +1,16 @@
 import { AppShell } from "@/components/ui/AppShell";
 import { ForecastClient } from "@/components/forecast/ForecastClient";
-import { getForecastParams, getForecastStart, getForecastSnapshots } from "@/lib/queries/forecast";
+import { getForecastParams, getForecastStart, getForecastSnapshots, getInvestGainByGroup } from "@/lib/queries/forecast";
 import { getProfile } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function ForecastPage() {
-  const [params, start, snapshots, profile] = await Promise.all([
+  const [params, start, snapshots, investGainGroups, profile] = await Promise.all([
     getForecastParams(),
     getForecastStart(),
     getForecastSnapshots(),
+    getInvestGainByGroup(),
     getProfile(),
   ]);
 
@@ -22,7 +23,7 @@ export default async function ForecastPage() {
       bandPadBottom={88}
       pullUp={56}
     >
-      <ForecastClient params={params} start={start} snapshots={snapshots} />
+      <ForecastClient params={params} start={start} snapshots={snapshots} investGainGroups={investGainGroups} />
     </AppShell>
   );
 }

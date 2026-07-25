@@ -2,6 +2,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { positive, guard } from "@/lib/validate";
+import { getForecastParams } from "@/lib/queries/forecast";
+import { getPrevSnapshotStart } from "@/lib/queries";
+import { runForecast } from "@/lib/forecast";
+import type { ForecastStart } from "@/lib/queries/forecast";
 
 /**
  * Server actions — chỉ gọi RPC (không tự UPDATE balance). RPC là nơi duy nhất
@@ -142,9 +146,48 @@ export async function deleteTransaction(txId: string) {
 
 export async function closeMonth(monthKey: string) {
   const sb = await createClient();
+  // 1) Ghi số THỰC + khoá tháng (idempotent). Đây là nguồn sự thật của snapshot.
   const { error } = await sb.rpc("close_month", { p_month_key: monthKey });
   if (error) return { ok: false, error: error.message };
+
+  // 2) Đóng băng forecast baseline cho backtest: engine TS chạy 1 bước từ snapshot
+  //    tháng liền trước + plan hiện hành → NW dự phóng cho tháng này. Lỗi ở đây KHÔNG
+  //    làm hỏng số thực (đã commit); lần chốt lại kế tiếp sẽ tự ghi lại.
+  try {
+    const prev = await getPrevSnapshotStart(monthKey);
+    if (prev) {
+      const params = await getForecastParams();
+      const scenarioKeys = Object.keys(params.scenarios);
+      const scenario = scenarioKeys.includes("base") ? "base" : scenarioKeys[0];
+      if (scenario) {
+        // receivablesFirstMonth = 0: snapshot as-of cuối tháng chưa gồm khoản chờ thu,
+        // nên baseline phải khớp định nghĩa đó (không cộng receivables vào bước 1).
+        const start: ForecastStart = {
+          cash: prev.cash,
+          gold: prev.gold,
+          stock: prev.stock,
+          deposits: prev.deposits,
+          total: prev.total,
+          receivablesFirstMonth: 0,
+          baselineMonthKey: prev.month_key,
+          anchoredToSnapshot: true,
+        };
+        const r = runForecast(params, start, scenario, 1);
+        const forecastTotal = Math.round(r.nwSeries[1] ?? r.startTotal);
+        await sb.rpc("set_forecast_baseline", {
+          p_month_key: monthKey,
+          p_forecast_total: forecastTotal,
+          p_forecast_scenario: scenario,
+        });
+      }
+    }
+  } catch {
+    // nuốt lỗi baseline — không chặn việc chốt tháng.
+  }
+
   revalidate();
+  revalidatePath("/history");
+  revalidatePath("/forecast");
   return { ok: true };
 }
 

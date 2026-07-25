@@ -6,7 +6,22 @@ import { nonNegative, nonEmpty, guard } from "@/lib/validate";
 function rev() {
   revalidatePath("/upwork");
   revalidatePath("/ledger");
+  revalidatePath("/calendar");
   revalidatePath("/");
+}
+
+/** Ngày DỰ KIẾN bill/thu của contract (S-1) — metadata cho Calendar, không đụng tiền. */
+export async function setContractExpectedOn(id: string, expectedOn: string | null) {
+  return guard(async () => {
+    const sb = await createClient();
+    const { error } = await sb
+      .from("upwork_contracts")
+      .update({ expected_on: expectedOn || null })
+      .eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    rev();
+    return { ok: true };
+  });
 }
 
 export async function createContract(input: {
