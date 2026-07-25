@@ -8,19 +8,19 @@ import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { DueDateButton } from "@/components/ui/DueDateButton";
 import {
-  createProject,
-  updateProject,
-  deleteProject,
-  createMilestone,
-  updateMilestone,
-  deleteMilestone,
-  billMilestone,
-  collectMilestone,
-  cancelMilestone,
-  setMilestoneDueOn,
+  createContract,
+  updateContract,
+  deleteContract,
+  createPayment,
+  updatePayment,
+  deletePayment,
+  billPayment,
+  collectPayment,
+  cancelPayment,
+  setPaymentDueOn,
 } from "@/lib/actions/projects";
 import { rollbackStatus } from "@/lib/actions/ledger";
-import type { ProjectFinance, Milestone } from "@/lib/queries/projects";
+import type { ContractFinance, Payment } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
 
 const CURRENCIES = ["VND", "CAD", "USD"] as const;
@@ -38,7 +38,7 @@ const projStatusStyle: Record<string, { label: string; bg: string; fg: string }>
   paused: { label: "Paused", bg: "#EDEAE0", fg: "#9AA49E" },
 };
 
-const msIcon: Record<Milestone["status"], { icon: string; bg: string; fg: string }> = {
+const msIcon: Record<Payment["status"], { icon: string; bg: string; fg: string }> = {
   draft: { icon: "ph-duotone ph-clock", bg: "#F2EFE6", fg: "#9AA49E" },
   billed: { icon: "ph-duotone ph-hourglass-medium", bg: "#FBF0DC", fg: "#A5731F" },
   received: { icon: "ph-duotone ph-check-circle", bg: "#DFF2E7", fg: "#1F7A5C" },
@@ -71,7 +71,7 @@ export function ProjectsClient({
   fx,
 }: {
   monthKey: string;
-  projects: ProjectFinance[];
+  projects: ContractFinance[];
   accounts: Ref[];
   sources: Ref[];
   fx: Record<string, number>;
@@ -93,11 +93,11 @@ export function ProjectsClient({
   function openNew() {
     setEdit({ id: null, client: "", name: "", currency: "CAD", contractValue: "", status: "active", location: "", source: defaultSource });
   }
-  function openEdit(p: ProjectFinance) {
+  function openEdit(p: ContractFinance) {
     setEdit({
       id: p.id,
       client: p.client,
-      name: p.name,
+      name: p.name ?? "",
       currency: p.currency,
       contractValue: p.contract_value != null ? String(p.contract_value) : "",
       status: p.status,
@@ -119,8 +119,8 @@ export function ProjectsClient({
       source: edit.source,
     };
     const res = edit.id
-      ? await updateProject({ id: edit.id, ...payload })
-      : await createProject(payload);
+      ? await updateContract({ id: edit.id, ...payload })
+      : await createContract({ ...payload, paymentModel: "fixed_milestones" });
     setBusy(false);
     if (!res.ok) return alert(res.error);
     setEdit(null);
@@ -130,7 +130,7 @@ export function ProjectsClient({
     if (!edit?.id) return;
     if (!confirm(`Xoá dự án "${edit.name}"? Mọi milestone nháp sẽ bị xoá theo.`)) return;
     setBusy(true);
-    const res = await deleteProject(edit.id);
+    const res = await deleteContract(edit.id);
     setBusy(false);
     if (!res.ok) return alert(res.error);
     setEdit(null);
@@ -139,10 +139,11 @@ export function ProjectsClient({
   async function addMilestone() {
     if (!edit?.id || !newMsName || !newMsAmount) return;
     setBusy(true);
-    // sort tự tăng theo số milestone hiện có của dự án (bỏ sort=0 cứng).
-    const existing = projects.find((pp) => pp.id === edit.id)?.milestones.length ?? 0;
-    const res = await createMilestone({
-      projectId: edit.id,
+    // sort tự tăng theo số đợt hiện có của dự án (bỏ sort=0 cứng).
+    const existing = projects.find((pp) => pp.id === edit.id)?.payments.length ?? 0;
+    const res = await createPayment({
+      contractId: edit.id,
+      kind: "milestone",
       name: newMsName,
       amount: Number(newMsAmount),
       sort: existing,
@@ -218,7 +219,7 @@ export function ProjectsClient({
             <div className="mt-4">
               <div className="flex justify-between text-[12px] text-ink-soft mb-[7px]">
                 <span className="font-semibold">
-                  {p.milestone_paid}/{p.milestone_count} milestones paid
+                  {p.payment_paid}/{p.payment_count} milestones paid
                 </span>
                 <span className="font-extrabold">{pctColl}% collected</span>
               </div>
@@ -237,10 +238,11 @@ export function ProjectsClient({
 
             {/* Milestones */}
             <div className="mt-4 flex gap-2 flex-wrap">
-              {p.milestones.map((m) => {
+              {p.payments.map((m) => {
                 const mi = msIcon[m.status];
                 const locked = m.amount_vnd != null; // billed/received → fx đã khoá
-                const vnd = m.amount_vnd ?? Math.round(m.amount * (fx[p.currency] ?? 1));
+                const amt = m.amount ?? 0;
+                const vnd = m.amount_vnd ?? Math.round(amt * (fx[p.currency] ?? 1));
                 return (
                   <div
                     key={m.id}
@@ -255,7 +257,7 @@ export function ProjectsClient({
                     <div>
                       <div className="text-[12px] font-semibold">{m.name}</div>
                       <div className="text-[11px] text-muted tnum" title={full(vnd)}>
-                        {ccy(m.amount, p.currency)} · {fmt(vnd)}
+                        {ccy(amt, p.currency)} · {fmt(vnd)}
                         {p.currency !== "VND" && (
                           <span className="text-faint">
                             {" "}
@@ -271,11 +273,11 @@ export function ProjectsClient({
                       </div>
                     </div>
                     {(m.status === "draft" || m.status === "billed") && (
-                      <DueDateButton value={m.due_on} onSave={(d) => doAction(() => setMilestoneDueOn(m.id, d))} />
+                      <DueDateButton value={m.due_on} onSave={(d) => doAction(() => setPaymentDueOn(m.id, d))} />
                     )}
                     {m.status === "draft" && (
                       <button
-                        onClick={() => doAction(() => billMilestone(m.id, monthKey))}
+                        onClick={() => doAction(() => billPayment(m.id, monthKey))}
                         disabled={busy}
                         className="ml-[6px] bg-primary-dark text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-[#0A211C] whitespace-nowrap disabled:opacity-50"
                       >
@@ -311,7 +313,7 @@ export function ProjectsClient({
                         onClick={() => {
                           const back = m.status === "received" ? "billed" : "draft";
                           if (confirm(`Lùi "${m.name}" từ ${m.status} → ${back}?${m.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`))
-                            doAction(() => rollbackStatus("milestones", m.id));
+                            doAction(() => rollbackStatus("payments", m.id));
                         }}
                         disabled={busy}
                         aria-label="Lùi trạng thái"
@@ -324,7 +326,7 @@ export function ProjectsClient({
                     {(m.status === "draft" || m.status === "billed") && (
                       <button
                         onClick={() => {
-                          if (confirm(`Huỷ milestone "${m.name}"?`)) doAction(() => cancelMilestone(m.id));
+                          if (confirm(`Huỷ milestone "${m.name}"?`)) doAction(() => cancelPayment(m.id));
                         }}
                         disabled={busy}
                         aria-label="Huỷ milestone"
@@ -396,7 +398,7 @@ export function ProjectsClient({
               {/* Milestone hiện có — sửa/xoá (chỉ draft) */}
               {edit.id && (() => {
                 const proj = projects.find((pp) => pp.id === edit.id);
-                const ms = proj?.milestones ?? [];
+                const ms = proj?.payments ?? [];
                 if (ms.length === 0) return null;
                 return (
                   <div className="border-t border-divider pt-3">
@@ -419,7 +421,7 @@ export function ProjectsClient({
                               <button
                                 onClick={async () => {
                                   const e = msEdits[m.id];
-                                  await doAction(() => updateMilestone({ id: m.id, name: e?.name ?? m.name, amount: Number(e?.amount ?? m.amount) || 0 }));
+                                  await doAction(() => updatePayment({ id: m.id, name: e?.name ?? m.name ?? "", amount: Number(e?.amount ?? m.amount) || 0 }));
                                 }}
                                 disabled={busy}
                                 className="text-primary text-[16px] px-1 disabled:opacity-50"
@@ -429,7 +431,7 @@ export function ProjectsClient({
                               </button>
                               <button
                                 onClick={() => {
-                                  if (confirm(`Xoá milestone "${m.name}"?`)) doAction(() => deleteMilestone(m.id));
+                                  if (confirm(`Xoá milestone "${m.name}"?`)) doAction(() => deletePayment(m.id));
                                 }}
                                 disabled={busy}
                                 className="text-[#B4573B] text-[16px] px-1 disabled:opacity-50"
@@ -441,7 +443,7 @@ export function ProjectsClient({
                           ) : (
                             <div className="flex items-center gap-2 flex-1 text-[12px] text-muted">
                               <span className="flex-1">{m.name}</span>
-                              <span className="tnum">{ccy(m.amount, edit.currency)}</span>
+                              <span className="tnum">{ccy(m.amount ?? 0, edit.currency)}</span>
                               <span className="text-[10px] font-bold rounded-full px-[8px] py-[2px] bg-fill-soft">
                                 {m.status === "received" ? "Đã thu" : m.status === "billed" ? "Đã bill" : "Đã huỷ"}
                               </span>
@@ -533,7 +535,7 @@ export function ProjectsClient({
                 className="flex-1"
                 disabled={!collectAccount}
                 onClick={async () => {
-                  await doAction(() => collectMilestone(collect.id, collectAccount));
+                  await doAction(() => collectPayment(collect.id, collectAccount));
                   setCollect(null);
                 }}
               >

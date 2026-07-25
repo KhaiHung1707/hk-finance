@@ -3,7 +3,7 @@ import { getReceivables, getMonthKeys, getMonthlySummary, getAllocation } from "
 
 /**
  * Calendar / Agenda — sự kiện tài chính SẮP TỚI (forward-looking) + Alerts.
- * Nguồn ngày: term_deposits.maturity_on, milestones.due_on, upwork_contracts.expected_on (S-1),
+ * Nguồn ngày: term_deposits.maturity_on, payments.due_on (join contracts),
  * receivables (income pending), month_keys.closed_at (tháng chưa chốt).
  * Mọi số/ngày từ DB — không hardcode. "Hôm nay" tính ở server lúc request.
  */
@@ -41,17 +41,15 @@ export async function getUpcomingEvents(): Promise<CalendarEvent[]> {
   const sb = await createClient();
   const events: CalendarEvent[] = [];
 
-  const [{ data: deposits }, { data: milestones }, { data: contracts }, { data: fxRows }, receivables] =
+  const [{ data: deposits }, { data: payments }, { data: fxRows }, receivables] =
     await Promise.all([
       sb.from("term_deposits").select("id, name, principal, maturity_on, status").eq("status", "active"),
       sb
-        .from("milestones")
-        .select("id, name, amount, status, due_on, project:projects(client, name, currency)")
+        .from("payments")
+        .select(
+          "id, name, amount, hours, status, due_on, kind, contract:contracts(client, name, currency, payment_model, hourly_rate, fee_pct)"
+        )
         .in("status", ["draft", "billed"]),
-      sb
-        .from("upwork_contracts")
-        .select("id, client, job, amount_usd, fee_pct, expected_on, status")
-        .in("status", ["draft", "active", "billed"]),
       sb.from("fx_rates").select("ccy, rate, as_of").order("as_of", { ascending: false }),
       getReceivables(),
     ]);
@@ -73,32 +71,35 @@ export async function getUpcomingEvents(): Promise<CalendarEvent[]> {
     });
   }
 
-  // -- milestones: due_on (S-1) --
-  for (const m of milestones ?? []) {
-    const proj = (m as any).project;
-    const ccy = proj?.currency ?? "VND";
-    events.push({
-      id: `ms-${m.id}`,
-      kind: "milestone",
-      date: (m as any).due_on ?? null,
-      title: `${proj?.name ?? "Project"} · ${m.name}`,
-      subtitle: `${proj?.client ?? ""} — ${m.status === "billed" ? "đã bill, chờ thu" : "dự kiến bill"}`.trim(),
-      amount: toVnd(Number(m.amount), ccy, fx),
-      ...KIND_META.milestone,
-    });
-  }
+  // -- payments (contracts hợp nhất): due_on --
+  for (const p of payments ?? []) {
+    const ct = (p as any).contract;
+    const model = ct?.payment_model ?? "fixed_milestones";
+    // Model Upwork (không phải fixed_milestones) → có phí Upwork trừ khi fee_pct set.
+    const isUpworkModel = model !== "fixed_milestones";
+    const feePct = isUpworkModel && ct?.fee_pct != null ? Number(ct.fee_pct) : 0;
 
-  // -- upwork: expected_on (S-1) --
-  for (const c of contracts ?? []) {
-    const net = c.amount_usd != null ? Number(c.amount_usd) * (1 - Number(c.fee_pct ?? 0.1)) : null;
+    // Ước lượng VND: đợt hourly → hours × hourly_rate (USD); còn lại → amount theo currency contract.
+    let amountVnd: number | null;
+    if (model === "hourly_weekly") {
+      const gross = p.hours != null && ct?.hourly_rate != null ? Number(p.hours) * Number(ct.hourly_rate) : null;
+      amountVnd = toVnd(gross != null ? gross * (1 - feePct) : null, "USD", fx);
+    } else {
+      const ccy = ct?.currency ?? "VND";
+      const gross = p.amount != null ? Number(p.amount) : null;
+      amountVnd = toVnd(gross != null ? gross * (1 - feePct) : null, ccy, fx);
+    }
+
+    // Chọn kind theo payment_model: fixed_milestones → milestone; còn lại → upwork.
+    const kind: EventKind = model === "fixed_milestones" ? "milestone" : "upwork";
     events.push({
-      id: `uw-${c.id}`,
-      kind: "upwork",
-      date: (c as any).expected_on ?? null,
-      title: `Upwork · ${c.client}${c.job ? " — " + c.job : ""}`,
-      subtitle: c.status === "billed" ? "đã bill, chờ thu" : "dự kiến bill",
-      amount: toVnd(net, "USD", fx),
-      ...KIND_META.upwork,
+      id: `pay-${p.id}`,
+      kind,
+      date: (p as any).due_on ?? null,
+      title: `${ct?.client ?? "Contract"} · ${p.name}`,
+      subtitle: p.status === "billed" ? "đã bill, chờ thu" : "dự kiến bill",
+      amount: amountVnd,
+      ...KIND_META[kind],
     });
   }
 

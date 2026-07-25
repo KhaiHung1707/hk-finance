@@ -568,33 +568,18 @@ create or replace function rollback_status(p_ref_table text, p_ref_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_status text; v_tx uuid;
 begin
-  if p_ref_table = 'upwork_contracts' then
-    select status, income_tx_id into v_status, v_tx from upwork_contracts where id = p_ref_id for update;
-    if not found then raise exception 'rollback_status: hợp đồng không tồn tại'; end if;
+  if p_ref_table = 'payments' then
+    -- Gộp milestone + upwork (cùng vòng đời draft→billed→received). Lùi 1 bước.
+    select status, income_tx_id into v_status, v_tx from payments where id = p_ref_id for update;
+    if not found then raise exception 'rollback_status: đợt chi trả không tồn tại'; end if;
     if v_status = 'received' then
       -- received → billed: tiền về pending (rút khỏi tài khoản), gỡ ngày nhận.
       update transactions set status = 'pending', account_id = null, received_at = null where id = v_tx;
-      update upwork_contracts set status = 'billed', received_on = null where id = p_ref_id;
+      update payments set status = 'billed', received_on = null where id = p_ref_id;
     elsif v_status = 'billed' then
       -- billed → draft: xoá tx pending, gỡ fx/amount đã khoá.
       if v_tx is not null then delete from transactions where id = v_tx; end if;
-      update upwork_contracts set status = 'draft', fx_rate = null, amount_vnd = null,
-        income_tx_id = null, billed_on = null where id = p_ref_id;
-    elsif v_status = 'active' then
-      update upwork_contracts set status = 'draft' where id = p_ref_id;
-    else
-      raise exception 'rollback_status: không lùi được từ trạng thái %', v_status;
-    end if;
-
-  elsif p_ref_table = 'milestones' then
-    select status, income_tx_id into v_status, v_tx from milestones where id = p_ref_id for update;
-    if not found then raise exception 'rollback_status: milestone không tồn tại'; end if;
-    if v_status = 'received' then
-      update transactions set status = 'pending', account_id = null, received_at = null where id = v_tx;
-      update milestones set status = 'billed', received_on = null where id = p_ref_id;
-    elsif v_status = 'billed' then
-      if v_tx is not null then delete from transactions where id = v_tx; end if;
-      update milestones set status = 'draft', fx_rate = null, amount_vnd = null,
+      update payments set status = 'draft', fx_rate = null, amount_vnd = null, gross_vnd = null,
         income_tx_id = null, billed_on = null where id = p_ref_id;
     else
       raise exception 'rollback_status: không lùi được từ trạng thái %', v_status;

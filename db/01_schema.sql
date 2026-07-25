@@ -153,57 +153,55 @@ create table if not exists market_prices (
   primary key (asset_key, as_of)
 );
 
--- ---------- Projects & milestones --------------------------------------------
-
-create table if not exists projects (
+-- ---------- Contracts + Payments (model HỢP NHẤT — thay Projects + Upwork) ----
+-- Gộp projects (fixed_milestones) + upwork_contracts (one_shot/hourly_weekly) +
+-- Structure retainer (monthly_retainer) vào MỘT model 2 tầng:
+--   contracts (đầu mối) → payments (đợt chi trả, freeze fx per-đợt như milestone cũ).
+-- Mỗi payment bill → 1 income tx pending (ref_table='payments'); receive → ledger.
+create table if not exists contracts (
   id             uuid primary key default gen_random_uuid(),
   client         text not null,
-  name           text not null,
-  source_id      uuid references income_sources(id), -- Structure | Outsource
+  name           text,                    -- projects.name / upwork.job
+  source_id      uuid references income_sources(id),   -- MỌI contract (bỏ hard-code Upwork)
+  payment_model  text not null default 'fixed_milestones'
+                   check (payment_model in ('fixed_milestones','one_shot','hourly_weekly','monthly_retainer')),
   currency       text not null default 'VND' check (currency in ('VND','CAD','USD')),
-  contract_value numeric,               -- trong `currency`; null = chưa điền
+  fee_pct        numeric,                 -- null = không trừ; model Upwork fallback settings.upwork_fee_pct
+  hourly_rate    numeric,                 -- USD/giờ, chỉ hourly_weekly
+  contract_value numeric,                 -- ước lượng tổng (projects.contract_value)
+  retainer_amount numeric,                -- khoản/tháng cố định cho monthly_retainer
   status         text not null default 'active'
-                   check (status in ('active','done','maintenance','paused')),
+                   check (status in ('active','done','maintenance','paused','cancelled')),
   location       text,
   note           text
 );
 
-create table if not exists milestones (
+create table if not exists payments (
   id           uuid primary key default gen_random_uuid(),
-  project_id   uuid not null references projects(id) on delete cascade,
-  name         text not null,
-  amount       numeric not null,        -- trong project currency
+  contract_id  uuid not null references contracts(id) on delete cascade,
+  kind         text not null default 'milestone'
+                 check (kind in ('milestone','one_shot','weekly','monthly')),
+  name         text,                      -- 'Đợt 1' / 'Tuần 30' / 'T7/26'
+  amount       numeric,                   -- nhập tay (milestone/one_shot/retainer) trong contract.currency
+  hours        numeric,                   -- hourly_weekly: hours × contract.hourly_rate → gross (USD)
+  period_start date,                      -- weekly: đầu tuần (thứ 2)
+  period_end   date,                      -- weekly: cuối tuần
+  period_month text references month_keys(key),  -- monthly retainer: idempotency key
   status       text not null default 'draft'
                  check (status in ('draft','billed','received','cancelled')),
-  fx_rate      numeric,                 -- khoá khi bill (VND: 1)
-  amount_vnd   bigint,                  -- freeze khi bill
+  fx_rate      numeric,                   -- khoá khi bill (VND=1)
+  amount_vnd   bigint,                    -- FREEZE net_vnd (đã trừ fee) khi bill
+  gross_vnd    bigint,                    -- gross trước fee (hiển thị)
   income_tx_id uuid references transactions(id),
-  due_on       date,                    -- ngày DỰ KIẾN bill/thu (cho Calendar) — khác billed_on/received_on (actual)
+  due_on       date,                      -- DỰ KIẾN (Calendar)
   billed_on    date,
   received_on  date,
   note         text,
   sort         int default 0
 );
-
--- ---------- Upwork ------------------------------------------------------------
-
-create table if not exists upwork_contracts (
-  id            uuid primary key default gen_random_uuid(),
-  client        text not null,
-  job           text,
-  contract_type text default 'fixed' check (contract_type in ('fixed','hourly')),
-  amount_usd    numeric,
-  fee_pct       numeric,                -- override; null = dùng settings mặc định
-  status        text not null default 'draft'
-                  check (status in ('draft','active','billed','received','cancelled')),
-  fx_rate       numeric,                -- khoá khi bill
-  amount_vnd    bigint,
-  income_tx_id  uuid references transactions(id),
-  expected_on   date,                   -- ngày DỰ KIẾN bill/thu (cho Calendar) — khác billed_on/received_on (actual)
-  billed_on     date,
-  received_on   date,
-  note          text
-);
+-- IDEMPOTENT generator retainer: 1 đợt/tháng/contract (chỉ áp cho đợt có period_month).
+create unique index if not exists payments_contract_month_uniq
+  on payments (contract_id, period_month) where period_month is not null;
 
 -- ---------- In3D: filaments & print orders -----------------------------------
 
@@ -272,14 +270,8 @@ create table if not exists app_profile (
 -- ---------- Migrations cho DB đã tồn tại -------------------------------------
 -- `create table if not exists` KHÔNG thêm cột mới vào bảng đã có. Với DB đang chạy,
 -- thêm cột qua ALTER ... IF NOT EXISTS (idempotent, không mất dữ liệu).
-alter table milestones        add column if not exists received_on date;
-alter table upwork_contracts  add column if not exists billed_on   date;
-alter table upwork_contracts  add column if not exists received_on date;
-
--- S-1 (Phase 4): ngày DỰ KIẾN bill/thu — đổ sự kiện có ngày lên Calendar/Agenda.
--- Khác *_on actual (chỉ có giá trị khi đã xảy ra). Nullable, không phá dữ liệu cũ.
-alter table milestones        add column if not exists due_on      date;
-alter table upwork_contracts  add column if not exists expected_on date;
+-- (Bảng projects/milestones/upwork_contracts đã hợp nhất vào contracts/payments —
+--  ALTER cũ của chúng gỡ bỏ; migrate 1 lần ở db/10_migrate_contracts.sql.)
 
 -- Chốt theo tháng (Phase 1/2): khoá tháng + snapshot dòng tiền + as-of.
 alter table month_keys           add column if not exists closed_at timestamptz;

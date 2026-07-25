@@ -10,7 +10,7 @@ begin
   foreach t in array array[
     'month_keys','income_sources','expense_categories','accounts','tickers',
     'fx_rates','settings','transactions','term_deposits','stock_trades','dividends',
-    'gold_lots','market_prices','projects','milestones','upwork_contracts',
+    'gold_lots','market_prices','contracts','payments',
     'filaments','print_orders','net_worth_snapshots','app_profile'
   ]
   loop

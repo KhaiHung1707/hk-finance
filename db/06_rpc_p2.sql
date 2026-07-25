@@ -122,235 +122,213 @@ begin
 end $$;
 
 -- =============================================================================
--- UPWORK
+-- CONTRACTS & PAYMENTS (model HỢP NHẤT — thay Upwork + Projects/Milestones)
+-- contracts (đầu mối, mọi source) → payments (đợt, freeze fx per-đợt).
+-- payment_model: fixed_milestones | one_shot | hourly_weekly | monthly_retainer.
 -- =============================================================================
 
-create or replace function activate_contract(p_id uuid)
-returns void language plpgsql security definer set search_path = public as $$
-begin
-  update upwork_contracts set status = 'active' where id = p_id and status = 'draft';
-  if not found then raise exception 'activate_contract: chỉ chuyển được từ draft'; end if;
-end $$;
-
--- bill_contract: khoá fx USD, tính net_vnd, tạo pending income tx (nguồn Upwork).
-create or replace function bill_contract(p_id uuid, p_month_key text)
-returns uuid language plpgsql security definer set search_path = public as $$
-declare v_usd numeric; v_fee numeric; v_fx numeric; v_net_vnd bigint; v_tx uuid; v_status text; v_client text;
-begin
-  perform ensure_month(p_month_key);
-  select amount_usd, coalesce(fee_pct, (select (value)::numeric from settings where key='upwork_fee_pct')),
-         status, client
-    into v_usd, v_fee, v_status, v_client
-  from upwork_contracts where id = p_id for update;
-  if not found then raise exception 'bill_contract: contract không tồn tại'; end if;
-  if v_status not in ('draft','active') then raise exception 'bill_contract: trạng thái không hợp lệ'; end if;
-  if v_usd is null then raise exception 'bill_contract: chưa nhập amount_usd'; end if;
-
-  v_fx := _latest_fx('USD');
-  if v_fx is null then raise exception 'bill_contract: chưa có tỷ giá USD'; end if;
-  v_net_vnd := (v_usd * (1 - v_fee) * v_fx)::bigint;
-
-  insert into transactions(type, status, amount, month_key, source_id, note, ref_table, ref_id)
-  values ('income','pending', v_net_vnd, p_month_key, _source_id('Upwork'),
-          'Upwork · ' || coalesce(v_client,''), 'upwork_contracts', p_id)
-  returning id into v_tx;
-
-  update upwork_contracts
-    set status = 'billed', fx_rate = v_fx, amount_vnd = v_net_vnd, income_tx_id = v_tx,
-        billed_on = current_date
-  where id = p_id;
-  return v_tx;
-end $$;
-
-create or replace function receive_contract(p_id uuid, p_account_id uuid)
-returns void language plpgsql security definer set search_path = public as $$
-declare v_tx uuid;
-begin
-  select income_tx_id into v_tx from upwork_contracts where id = p_id;
-  if v_tx is null then raise exception 'receive_contract: chưa bill'; end if;
-  perform mark_received(v_tx, p_account_id); -- tự set upwork_contracts.status='received'
-end $$;
-
-create or replace function cancel_contract(p_id uuid)
-returns void language plpgsql security definer set search_path = public as $$
-declare v_tx uuid;
-begin
-  select income_tx_id into v_tx from upwork_contracts where id = p_id;
-  update upwork_contracts set status = 'cancelled' where id = p_id;
-  if v_tx is not null then update transactions set status = 'cancelled' where id = v_tx; end if;
-end $$;
-
--- create_contract: tạo hợp đồng Upwork (draft — CHƯA ghi tiền, tx chỉ sinh ở
--- bill_contract). Đi qua RPC để nhất quán kiến trúc + guard fee_pct/amount_usd.
+-- ---------- Contract CRUD ----------------------------------------------------
 create or replace function create_contract(
-  p_client text, p_job text, p_contract_type text,
-  p_amount_usd numeric default null, p_fee_pct numeric default null
+  p_client text, p_name text, p_payment_model text, p_source text,
+  p_currency text default 'VND', p_fee_pct numeric default null,
+  p_hourly_rate numeric default null, p_contract_value numeric default null,
+  p_retainer_amount numeric default null, p_status text default 'active',
+  p_location text default null
 ) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare v_id uuid;
 begin
-  if p_amount_usd is not null and p_amount_usd < 0 then
-    raise exception 'create_contract: amount_usd không được âm';
-  end if;
   if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 1) then
     raise exception 'create_contract: fee_pct phải trong [0,1] (nhận %)', p_fee_pct;
   end if;
-  insert into upwork_contracts(client, job, contract_type, amount_usd, fee_pct, status)
-  values (p_client, p_job, coalesce(p_contract_type,'fixed'), p_amount_usd, p_fee_pct, 'draft')
+  insert into contracts(client, name, source_id, payment_model, currency, fee_pct,
+                        hourly_rate, contract_value, retainer_amount, status, location)
+  values (p_client, p_name, _source_id(p_source), coalesce(p_payment_model,'fixed_milestones'),
+          coalesce(p_currency,'VND'), p_fee_pct, p_hourly_rate, p_contract_value,
+          p_retainer_amount, coalesce(p_status,'active'), p_location)
   returning id into v_id;
   return v_id;
 end $$;
 
--- update_contract: sửa CHỈ khi draft/active (chưa bill → chưa khoá fx/amount_vnd).
 create or replace function update_contract(
-  p_id uuid, p_client text, p_job text, p_contract_type text,
-  p_amount_usd numeric default null, p_fee_pct numeric default null
+  p_id uuid, p_client text, p_name text, p_payment_model text, p_source text,
+  p_currency text, p_fee_pct numeric, p_hourly_rate numeric,
+  p_contract_value numeric, p_retainer_amount numeric, p_status text,
+  p_location text default null
 ) returns void
 language plpgsql security definer set search_path = public as $$
-declare v_status text;
 begin
-  if p_amount_usd is not null and p_amount_usd < 0 then
-    raise exception 'update_contract: amount_usd không được âm';
-  end if;
   if p_fee_pct is not null and (p_fee_pct < 0 or p_fee_pct > 1) then
     raise exception 'update_contract: fee_pct phải trong [0,1]';
   end if;
-  select status into v_status from upwork_contracts where id = p_id for update;
-  if not found then raise exception 'update_contract: hợp đồng không tồn tại'; end if;
-  if v_status not in ('draft','active') then
-    raise exception 'update_contract: chỉ sửa được hợp đồng draft/active';
-  end if;
-  update upwork_contracts set client = p_client, job = p_job,
-    contract_type = coalesce(p_contract_type,'fixed'),
-    amount_usd = p_amount_usd, fee_pct = p_fee_pct where id = p_id;
-end $$;
-
--- =============================================================================
--- PROJECTS & MILESTONES
--- =============================================================================
-
-create or replace function create_project(
-  p_client text, p_name text, p_currency text,
-  p_contract_value numeric default null, p_source text default 'Structure',
-  p_status text default 'active', p_location text default null
-) returns uuid
-language plpgsql security definer set search_path = public as $$
-declare v_id uuid;
-begin
-  insert into projects(client, name, source_id, currency, contract_value, status, location)
-  values (p_client, p_name, _source_id(p_source), p_currency, p_contract_value, p_status, p_location)
-  returning id into v_id;
-  return v_id;
-end $$;
-
-create or replace function update_project(
-  p_id uuid, p_client text, p_name text, p_currency text,
-  p_contract_value numeric, p_status text, p_location text, p_source text default null
-) returns void
-language plpgsql security definer set search_path = public as $$
-begin
-  update projects
-    set client = p_client, name = p_name, currency = p_currency,
-        contract_value = p_contract_value, status = p_status, location = p_location,
-        source_id = coalesce(_source_id(p_source), source_id)
+  update contracts
+    set client = p_client, name = p_name,
+        payment_model = coalesce(p_payment_model, payment_model),
+        source_id = coalesce(_source_id(p_source), source_id),
+        currency = coalesce(p_currency, currency), fee_pct = p_fee_pct,
+        hourly_rate = p_hourly_rate, contract_value = p_contract_value,
+        retainer_amount = p_retainer_amount, status = coalesce(p_status, status),
+        location = p_location
   where id = p_id;
 end $$;
 
--- delete_project: xoá project + milestones (cascade). CHẶN nếu có milestone đã
--- bill/received (đã vào ledger) — phải huỷ/lùi trước để không lệch số dư.
-create or replace function delete_project(p_id uuid)
+-- delete_contract: CHẶN nếu còn payment đã bill/thu (đã vào ledger).
+create or replace function delete_contract(p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  if exists (select 1 from milestones where project_id = p_id and status in ('billed','received')) then
-    raise exception 'delete_project: còn milestone đã bill/thu — huỷ hoặc lùi trước khi xoá';
+  if exists (select 1 from payments where contract_id = p_id and status in ('billed','received')) then
+    raise exception 'delete_contract: còn đợt đã bill/thu — huỷ hoặc lùi trước khi xoá';
   end if;
-  delete from projects where id = p_id; -- milestones draft/cancelled cascade
+  delete from contracts where id = p_id; -- payments draft/cancelled cascade
 end $$;
 
-create or replace function create_milestone(
-  p_project_id uuid, p_name text, p_amount numeric, p_sort int default 0
+-- ---------- Payment CRUD -----------------------------------------------------
+-- create_payment: thêm 1 đợt (milestone/one_shot/weekly/monthly). Với hourly dùng
+-- p_hours; các loại khác dùng p_amount. Đợt tuần có period_start/end.
+create or replace function create_payment(
+  p_contract_id uuid, p_kind text, p_name text,
+  p_amount numeric default null, p_hours numeric default null,
+  p_period_start date default null, p_period_end date default null,
+  p_period_month text default null, p_due_on date default null, p_sort int default 0
 ) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare v_id uuid;
 begin
-  if p_amount is null or p_amount <= 0 then raise exception 'create_milestone: amount phải > 0'; end if;
-  insert into milestones(project_id, name, amount, status, sort)
-  values (p_project_id, p_name, p_amount, 'draft', p_sort)
+  if p_amount is not null and p_amount < 0 then raise exception 'create_payment: amount không âm'; end if;
+  if p_hours  is not null and p_hours  < 0 then raise exception 'create_payment: hours không âm'; end if;
+  if p_amount is null and p_hours is null then raise exception 'create_payment: cần amount hoặc hours'; end if;
+  if p_period_month is not null then perform ensure_month(p_period_month); end if;
+  insert into payments(contract_id, kind, name, amount, hours, period_start, period_end,
+                       period_month, due_on, status, sort)
+  values (p_contract_id, coalesce(p_kind,'milestone'), p_name, p_amount, p_hours,
+          p_period_start, p_period_end, p_period_month, p_due_on, 'draft', p_sort)
   returning id into v_id;
   return v_id;
 end $$;
 
--- update_milestone: sửa tên/amount — CHỈ khi còn draft (billed/received đã vào ledger).
-create or replace function update_milestone(p_id uuid, p_name text, p_amount numeric)
+-- update_payment: sửa — CHỈ khi draft.
+create or replace function update_payment(
+  p_id uuid, p_name text, p_amount numeric, p_hours numeric,
+  p_due_on date default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  select status into v_status from payments where id = p_id for update;
+  if not found then raise exception 'update_payment: đợt không tồn tại'; end if;
+  if v_status <> 'draft' then raise exception 'update_payment: chỉ sửa được đợt draft'; end if;
+  update payments set name = p_name, amount = p_amount, hours = p_hours, due_on = p_due_on where id = p_id;
+end $$;
+
+create or replace function delete_payment(p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_status text;
 begin
-  if p_amount is null or p_amount <= 0 then raise exception 'update_milestone: amount phải > 0'; end if;
-  select status into v_status from milestones where id = p_id for update;
-  if not found then raise exception 'update_milestone: milestone không tồn tại'; end if;
-  if v_status <> 'draft' then raise exception 'update_milestone: chỉ sửa được milestone draft'; end if;
-  update milestones set name = p_name, amount = p_amount where id = p_id;
+  select status into v_status from payments where id = p_id for update;
+  if not found then raise exception 'delete_payment: đợt không tồn tại'; end if;
+  if v_status <> 'draft' then raise exception 'delete_payment: chỉ xoá được đợt draft'; end if;
+  delete from payments where id = p_id;
 end $$;
 
--- delete_milestone: xoá — CHỈ khi còn draft (chưa tạo tx nào).
-create or replace function delete_milestone(p_id uuid)
-returns void language plpgsql security definer set search_path = public as $$
-declare v_status text;
-begin
-  select status into v_status from milestones where id = p_id for update;
-  if not found then raise exception 'delete_milestone: milestone không tồn tại'; end if;
-  if v_status <> 'draft' then raise exception 'delete_milestone: chỉ xoá được milestone draft'; end if;
-  delete from milestones where id = p_id;
-end $$;
-
--- bill_milestone: khoá fx, freeze amount_vnd, tạo pending income tx cho project.
-create or replace function bill_milestone(p_id uuid, p_month_key text)
+-- ---------- bill / collect / cancel (thay bill_milestone + bill_contract) -----
+-- bill_payment: tính gross theo model (hours×rate cho hourly, else amount), trừ
+-- fee (contract.fee_pct; model Upwork fallback settings.upwork_fee_pct), khoá fx,
+-- freeze net amount_vnd, tạo pending income tx (source từ contract, ref='payments').
+create or replace function bill_payment(p_id uuid, p_month_key text)
 returns uuid language plpgsql security definer set search_path = public as $$
-declare v_amount numeric; v_ccy text; v_fx numeric; v_vnd bigint; v_tx uuid;
-        v_proj uuid; v_src uuid; v_status text; v_pname text; v_mname text;
+declare v_status text; v_amount numeric; v_hours numeric; v_kind text; v_pname text;
+        v_ccy text; v_src uuid; v_fee_pct numeric; v_hourly numeric; v_model text; v_client text; v_cname text;
+        v_gross numeric; v_fee numeric; v_net numeric; v_fx numeric; v_net_vnd bigint; v_gross_vnd bigint; v_tx uuid;
 begin
   perform ensure_month(p_month_key);
-  select m.amount, m.status, m.project_id, m.name, p.currency, p.source_id, p.name
-    into v_amount, v_status, v_proj, v_mname, v_ccy, v_src, v_pname
-  from milestones m join projects p on p.id = m.project_id
-  where m.id = p_id for update;
-  if not found then raise exception 'bill_milestone: milestone không tồn tại'; end if;
-  if v_status <> 'draft' then raise exception 'bill_milestone: chỉ bill được milestone draft'; end if;
+  select pm.status, pm.amount, pm.hours, pm.kind, pm.name,
+         c.currency, c.source_id, c.fee_pct, c.hourly_rate, c.payment_model, c.client, c.name
+    into v_status, v_amount, v_hours, v_kind, v_pname,
+         v_ccy, v_src, v_fee_pct, v_hourly, v_model, v_client, v_cname
+  from payments pm join contracts c on c.id = pm.contract_id
+  where pm.id = p_id for update;
+  if not found then raise exception 'bill_payment: đợt không tồn tại'; end if;
+  if v_status <> 'draft' then raise exception 'bill_payment: chỉ bill được đợt draft'; end if;
 
-  if v_ccy = 'VND' then
-    v_fx := 1; v_vnd := v_amount::bigint;
+  -- (a) GROSS theo model (trong currency của contract)
+  if v_model = 'hourly_weekly' then
+    if v_hours is null or v_hourly is null then raise exception 'bill_payment: hourly cần hours + hourly_rate'; end if;
+    v_gross := v_hours * v_hourly;
   else
-    v_fx := _latest_fx(v_ccy);
-    if v_fx is null then raise exception 'bill_milestone: chưa có tỷ giá %', v_ccy; end if;
-    v_vnd := (v_amount * v_fx)::bigint;
+    if v_amount is null then raise exception 'bill_payment: cần amount'; end if;
+    v_gross := v_amount;
   end if;
 
+  -- (b) FEE: contract.fee_pct; model Upwork (one_shot/hourly/retainer) fallback settings.
+  v_fee := coalesce(v_fee_pct,
+    case when v_model in ('one_shot','hourly_weekly','monthly_retainer')
+         then (select (value)::numeric from settings where key='upwork_fee_pct') else 0 end, 0);
+  v_net := v_gross * (1 - v_fee);
+
+  -- (c) FX freeze
+  if v_ccy = 'VND' then
+    v_fx := 1;
+  else
+    v_fx := _latest_fx(v_ccy);
+    if v_fx is null then raise exception 'bill_payment: chưa có tỷ giá %', v_ccy; end if;
+  end if;
+  v_net_vnd   := (v_net   * v_fx)::bigint;
+  v_gross_vnd := (v_gross * v_fx)::bigint;
+
+  -- (d) pending income tx, source từ contract (không hard-code)
   insert into transactions(type, status, amount, month_key, source_id, note, ref_table, ref_id)
-  values ('income','pending', v_vnd, p_month_key, v_src,
-          v_pname || ' · ' || v_mname, 'milestones', p_id)
+  values ('income','pending', v_net_vnd, p_month_key, v_src,
+          coalesce(v_client,'') || ' · ' || coalesce(v_pname, v_cname, ''), 'payments', p_id)
   returning id into v_tx;
 
-  update milestones
-    set status = 'billed', fx_rate = v_fx, amount_vnd = v_vnd,
+  update payments
+    set status = 'billed', fx_rate = v_fx, amount_vnd = v_net_vnd, gross_vnd = v_gross_vnd,
         income_tx_id = v_tx, billed_on = current_date
   where id = p_id;
   return v_tx;
 end $$;
 
-create or replace function collect_milestone(p_id uuid, p_account_id uuid)
+create or replace function collect_payment(p_id uuid, p_account_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_tx uuid;
 begin
-  select income_tx_id into v_tx from milestones where id = p_id;
-  if v_tx is null then raise exception 'collect_milestone: chưa bill'; end if;
-  perform mark_received(v_tx, p_account_id); -- tự set milestones.status='received'
+  select income_tx_id into v_tx from payments where id = p_id;
+  if v_tx is null then raise exception 'collect_payment: chưa bill'; end if;
+  perform mark_received(v_tx, p_account_id); -- tự set payments.status='received'
 end $$;
 
-create or replace function cancel_milestone(p_id uuid)
+create or replace function cancel_payment(p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare v_tx uuid;
 begin
-  select income_tx_id into v_tx from milestones where id = p_id;
-  update milestones set status = 'cancelled' where id = p_id;
+  select income_tx_id into v_tx from payments where id = p_id;
+  update payments set status = 'cancelled' where id = p_id;
   if v_tx is not null then update transactions set status = 'cancelled' where id = v_tx; end if;
+end $$;
+
+-- ---------- generate_retainer_payments (Structure retainer tháng) ------------
+-- Sinh 1 đợt draft/tháng cho dải [from..to] theo month_keys.sort. IDEMPOTENT:
+-- on conflict (contract_id, period_month) do nothing. Chỉ sinh draft — bill thủ công.
+create or replace function generate_retainer_payments(
+  p_contract_id uuid, p_from_month text, p_to_month text
+) returns int
+language plpgsql security definer set search_path = public as $$
+declare v_amount numeric; v_model text; v_from int; v_to int; v_mk record; v_n int := 0;
+begin
+  select retainer_amount, payment_model into v_amount, v_model from contracts where id = p_contract_id;
+  if not found then raise exception 'generate_retainer: contract không tồn tại'; end if;
+  if v_model <> 'monthly_retainer' then raise exception 'generate_retainer: contract không phải monthly_retainer'; end if;
+  if v_amount is null then raise exception 'generate_retainer: chưa nhập retainer_amount'; end if;
+  perform ensure_month(p_from_month); perform ensure_month(p_to_month);
+  select sort into v_from from month_keys where key = p_from_month;
+  select sort into v_to   from month_keys where key = p_to_month;
+  if v_from > v_to then raise exception 'generate_retainer: from > to'; end if;
+
+  for v_mk in select key from month_keys where sort between v_from and v_to order by sort loop
+    insert into payments(contract_id, kind, name, amount, period_month, status, sort)
+    values (p_contract_id, 'monthly', v_mk.key, v_amount, v_mk.key, 'draft', 0)
+    on conflict (contract_id, period_month) where period_month is not null do nothing;
+    if found then v_n := v_n + 1; end if;
+  end loop;
+  return v_n;
 end $$;

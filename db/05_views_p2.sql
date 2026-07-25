@@ -34,57 +34,42 @@ select
 from print_orders po
 group by po.month_key;
 
--- ---------- Upwork: summary --------------------------------------------------
--- net USD = amount_usd × (1 − fee). fee lấy override hoặc settings.upwork_fee_pct.
-create or replace view v_upwork_summary as
-with fee_default as (
-  select coalesce((value)::numeric, 0.10) as pct from settings where key = 'upwork_fee_pct'
-)
-select
-  u.id,
-  u.client,
-  u.job,
-  u.contract_type,
-  u.amount_usd,
-  coalesce(u.fee_pct, (select pct from fee_default)) as fee_pct,
-  (u.amount_usd * (1 - coalesce(u.fee_pct, (select pct from fee_default))))::numeric as net_usd,
-  u.status,
-  u.fx_rate,
-  u.amount_vnd,
-  u.income_tx_id,
-  u.billed_on,
-  u.received_on,
-  u.expected_on
-from upwork_contracts u;
-
--- ---------- Projects: finance per project ------------------------------------
--- collected = Σ milestone received amount_vnd; outstanding = Σ billed(pending) amount_vnd.
--- contract_value_vnd: nếu VND → contract_value; nếu ngoại tệ → quy đổi theo fx mới nhất
--- (chỉ để hiển thị ước lượng; số thật freeze khi bill từng milestone).
-create or replace view v_project_finance as
+-- ---------- Contracts: finance per contract (thay v_project_finance + v_upwork_summary)
+-- collected = Σ payment received amount_vnd; outstanding = Σ billed(pending) amount_vnd.
+-- contract_value_vnd: quy đổi ước lượng theo fx mới nhất (số thật freeze khi bill từng đợt).
+-- net_usd: cho model Upwork/USD — Σ gross đợt × (1−fee) ước lượng (hiển thị).
+drop view if exists v_contract_finance cascade;
+create view v_contract_finance as
 with latest_fx as (
   select ccy, rate from (
     select ccy, rate, row_number() over (partition by ccy order by as_of desc) rn
     from fx_rates
   ) t where rn = 1
+),
+fee_default as (
+  select coalesce((value)::numeric, 0.10) as pct from settings where key = 'upwork_fee_pct'
 )
 select
-  p.id,
-  p.client,
-  p.name,
-  p.currency,
-  p.contract_value,
-  p.status,
-  p.location,
+  c.id,
+  c.client,
+  c.name,
+  c.payment_model,
+  c.currency,
+  c.fee_pct,
+  c.hourly_rate,
+  c.contract_value,
+  c.retainer_amount,
+  c.status,
+  c.location,
   case
-    when p.currency = 'VND' then coalesce(p.contract_value,0)::bigint
-    else (coalesce(p.contract_value,0) * coalesce((select rate from latest_fx f where f.ccy = p.currency),0))::bigint
+    when c.currency = 'VND' then coalesce(c.contract_value,0)::bigint
+    else (coalesce(c.contract_value,0) * coalesce((select rate from latest_fx f where f.ccy = c.currency),0))::bigint
   end as contract_value_vnd,
-  coalesce((select sum(m.amount_vnd) from milestones m
-            where m.project_id = p.id and m.status = 'received'),0) as collected_vnd,
-  coalesce((select sum(m.amount_vnd) from milestones m
-            where m.project_id = p.id and m.status = 'billed'),0) as outstanding_vnd,
-  (select count(*) from milestones m where m.project_id = p.id) as milestone_count,
-  (select count(*) from milestones m where m.project_id = p.id and m.status = 'received') as milestone_paid,
-  (select s.name from income_sources s where s.id = p.source_id) as source
-from projects p;
+  coalesce((select sum(pm.amount_vnd) from payments pm
+            where pm.contract_id = c.id and pm.status = 'received'),0) as collected_vnd,
+  coalesce((select sum(pm.amount_vnd) from payments pm
+            where pm.contract_id = c.id and pm.status = 'billed'),0) as outstanding_vnd,
+  (select count(*) from payments pm where pm.contract_id = c.id) as payment_count,
+  (select count(*) from payments pm where pm.contract_id = c.id and pm.status = 'received') as payment_paid,
+  (select s.name from income_sources s where s.id = c.source_id) as source
+from contracts c;

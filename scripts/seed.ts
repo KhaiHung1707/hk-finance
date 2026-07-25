@@ -12,7 +12,7 @@
  * - market_prices: gold_ring.
  * - pending_transactions: income pending, account null → nổi ở Receivables.
  * - settings: allocation_targets, upwork_fee_pct, forecast, house_goal... (jsonb theo key).
- * - projects / upwork_contracts (draft) — money để trống, điền qua UI.
+ * - contracts (hợp nhất projects + upwork_contracts) — payments để trống, điền qua UI.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -184,7 +184,7 @@ async function main() {
       );
     }
 
-    // ---- projects (money để trống, điền qua UI) ----
+    // ---- contracts từ projects (payment_model=fixed_milestones; money để trống, điền qua UI) ----
     for (const p of seed.projects) {
       const { rows } = await db.query(
         `select id from income_sources where name=$1`,
@@ -192,20 +192,20 @@ async function main() {
       );
       const sourceId = rows[0]?.id ?? null;
       await db.query(
-        `insert into projects(client, name, source_id, currency, contract_value, status)
-         select $1,$2,$3,$4,$5,$6
-         where not exists (select 1 from projects where client=$1 and name=$2)`,
+        `insert into contracts(client, name, source_id, payment_model, currency, contract_value, status)
+         select $1,$2,$3,'fixed_milestones',$4,$5,$6
+         where not exists (select 1 from contracts where client=$1 and name=$2)`,
         [p.client, p.name, sourceId, p.currency, p.contract_value ?? null, p.status]
       );
     }
 
-    // ---- upwork_contracts (draft) ----
+    // ---- contracts từ upwork_contracts (payment_model=one_shot, USD, source=Upwork) ----
     for (const u of seed.upwork_contracts) {
       await db.query(
-        `insert into upwork_contracts(client, job, contract_type, amount_usd, status, note)
-         select $1,$2,$3,$4,$5,$6
-         where not exists (select 1 from upwork_contracts where client=$1 and coalesce(job,'')=coalesce($2,''))`,
-        [u.client, u.job ?? null, u.contract_type ?? "fixed", u.amount_usd ?? null, u.status, u.note ?? null]
+        `insert into contracts(client, name, source_id, payment_model, currency, contract_value, fee_pct, status, note)
+         select $1,$2,(select id from income_sources where name='Upwork'),'one_shot','USD',$3,$4,$5,$6
+         where not exists (select 1 from contracts where client=$1 and coalesce(name,'')=coalesce($2,''))`,
+        [u.client, u.job ?? null, u.amount_usd ?? null, u.fee_pct ?? null, u.status, u.note ?? null]
       );
     }
 

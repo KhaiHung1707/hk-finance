@@ -2,8 +2,7 @@
 import { useState } from "react";
 import { ProjectsClient } from "@/components/projects/ProjectsClient";
 import { UpworkClient } from "@/components/upwork/UpworkClient";
-import type { ProjectFinance } from "@/lib/queries/projects";
-import type { UpworkContract } from "@/lib/queries/upwork";
+import type { ContractFinance } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
 
 /** Trang gộp Projects + Upwork: 2 tab. Mỗi tab render client tương ứng (kèm nút riêng). */
@@ -20,8 +19,8 @@ export function ProjectUpworkClient({
 }: {
   initialTab?: "projects" | "upwork";
   monthKey: string;
-  projects: ProjectFinance[];
-  contracts: UpworkContract[];
+  projects: ContractFinance[];
+  contracts: ContractFinance[];
   accounts: Ref[];
   sources: Ref[];
   fx: Record<string, number>;

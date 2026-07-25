@@ -126,10 +126,8 @@ begin
   where id = p_tx_id;
 
   -- Đồng bộ trạng thái module gốc (RPC duy trì cả hai chiều — audit fix #3).
-  if v_ref_table = 'milestones' then
-    update milestones set status = 'received', received_on = current_date where id = v_ref_id;
-  elsif v_ref_table = 'upwork_contracts' then
-    update upwork_contracts set status = 'received', received_on = current_date where id = v_ref_id;
+  if v_ref_table = 'payments' then
+    update payments set status = 'received', received_on = current_date where id = v_ref_id;
   elsif v_ref_table = 'print_orders' then
     update print_orders set status = 'received' where id = v_ref_id;
   end if;
@@ -147,10 +145,8 @@ begin
 
   update transactions set status = 'cancelled' where id = p_tx_id;
 
-  if v_ref_table = 'milestones' then
-    update milestones set status = 'cancelled' where id = v_ref_id;
-  elsif v_ref_table = 'upwork_contracts' then
-    update upwork_contracts set status = 'cancelled' where id = v_ref_id;
+  if v_ref_table = 'payments' then
+    update payments set status = 'cancelled' where id = v_ref_id;
   elsif v_ref_table = 'print_orders' then
     update print_orders set status = 'cancelled' where id = v_ref_id;
   elsif v_ref_table = 'term_deposits' then
@@ -206,11 +202,8 @@ begin
   if not found then raise exception 'delete_transaction: tx không tồn tại'; end if;
 
   -- đồng bộ module gốc trước (đảo ngược), rồi xoá tx.
-  if v_ref_table = 'milestones' then
-    update milestones set status = 'draft', fx_rate = null, amount_vnd = null,
-      income_tx_id = null, billed_on = null, received_on = null where id = v_ref_id;
-  elsif v_ref_table = 'upwork_contracts' then
-    update upwork_contracts set status = 'draft', fx_rate = null, amount_vnd = null,
+  if v_ref_table = 'payments' then
+    update payments set status = 'draft', fx_rate = null, amount_vnd = null, gross_vnd = null,
       income_tx_id = null, billed_on = null, received_on = null where id = v_ref_id;
   elsif v_ref_table = 'print_orders' then
     update print_orders set status = 'draft' where id = v_ref_id;
