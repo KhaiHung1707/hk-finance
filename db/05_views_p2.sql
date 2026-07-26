@@ -37,7 +37,7 @@ group by po.month_key;
 -- ---------- Contracts: finance per contract (thay v_project_finance + v_upwork_summary)
 -- collected = Σ payment received amount_vnd; outstanding = Σ billed(pending) amount_vnd.
 -- contract_value_vnd: quy đổi ước lượng theo fx mới nhất (số thật freeze khi bill từng đợt).
--- net_usd: cho model Upwork/USD — Σ gross đợt × (1−fee) ước lượng (hiển thị).
+-- Perf: gộp 4 subquery correlated → 1 lateral group-by (dùng idx_payments_contract_status).
 drop view if exists v_contract_finance cascade;
 create view v_contract_finance as
 with latest_fx as (
@@ -45,9 +45,6 @@ with latest_fx as (
     select ccy, rate, row_number() over (partition by ccy order by as_of desc) rn
     from fx_rates
   ) t where rn = 1
-),
-fee_default as (
-  select coalesce((value)::numeric, 0.10) as pct from settings where key = 'upwork_fee_pct'
 )
 select
   c.id,
@@ -65,11 +62,24 @@ select
     when c.currency = 'VND' then coalesce(c.contract_value,0)::bigint
     else (coalesce(c.contract_value,0) * coalesce((select rate from latest_fx f where f.ccy = c.currency),0))::bigint
   end as contract_value_vnd,
-  coalesce((select sum(pm.amount_vnd) from payments pm
-            where pm.contract_id = c.id and pm.status = 'received'),0) as collected_vnd,
-  coalesce((select sum(pm.amount_vnd) from payments pm
-            where pm.contract_id = c.id and pm.status = 'billed'),0) as outstanding_vnd,
-  (select count(*) from payments pm where pm.contract_id = c.id) as payment_count,
-  (select count(*) from payments pm where pm.contract_id = c.id and pm.status = 'received') as payment_paid,
+  coalesce(agg.collected_vnd, 0)   as collected_vnd,
+  coalesce(agg.outstanding_vnd, 0) as outstanding_vnd,
+  coalesce(agg.payment_count, 0)   as payment_count,
+  coalesce(agg.payment_paid, 0)    as payment_paid,
+  coalesce(agg.draft_count, 0)     as draft_count,      -- đợt chưa bill (cho bulk bill / scale)
+  agg.next_due,                                          -- hạn dự kiến gần nhất còn mở
   (select s.name from income_sources s where s.id = c.source_id) as source
-from contracts c;
+from contracts c
+left join lateral (
+  select
+    sum(pm.amount_vnd) filter (where pm.status = 'received')                as collected_vnd,
+    sum(pm.amount_vnd) filter (where pm.status = 'billed')                  as outstanding_vnd,
+    count(*)                                                                as payment_count,
+    count(*) filter (where pm.status = 'received')                         as payment_paid,
+    count(*) filter (where pm.status = 'draft')                            as draft_count,
+    min(pm.due_on) filter (where pm.status in ('draft','billed'))          as next_due
+  from payments pm where pm.contract_id = c.id
+) agg on true
+order by
+  case c.status when 'active' then 0 when 'maintenance' then 1 when 'paused' then 2 when 'done' then 3 else 4 end,
+  c.client;

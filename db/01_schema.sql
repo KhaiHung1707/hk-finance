@@ -197,11 +197,26 @@ create table if not exists payments (
   billed_on    date,
   received_on  date,
   note         text,
-  sort         int default 0
+  sort         int default 0,
+  -- A3: đúng MỘT trong amount/hours (amount cho milestone/one_shot/retainer; hours cho
+  -- hourly). Bỏ qua đợt 'cancelled' (có thể huỷ khi chưa nhập giá trị).
+  constraint payments_amount_xor_hours check (status = 'cancelled' or num_nonnulls(amount, hours) = 1),
+  -- A1: giá trị đợt luôn dương (chặn 0đ) — cho đợt còn hiệu lực.
+  constraint payments_positive check (status = 'cancelled' or coalesce(amount, hours) > 0),
+  -- B5: đã bill/thu thì fx + amount_vnd (net freeze) phải có — đây là số vào ledger.
+  -- gross_vnd chỉ để hiển thị (không ép: dữ liệu migrate cũ không có gross).
+  constraint payments_billed_frozen check (
+    status not in ('billed','received')
+    or (fx_rate is not null and amount_vnd is not null)
+  )
 );
 -- IDEMPOTENT generator retainer: 1 đợt/tháng/contract (chỉ áp cho đợt có period_month).
 create unique index if not exists payments_contract_month_uniq
   on payments (contract_id, period_month) where period_month is not null;
+-- A4: index cho v_contract_finance (4 subquery per contract) + cascade delete + calendar.
+create index if not exists idx_payments_contract        on payments (contract_id);
+create index if not exists idx_payments_contract_status on payments (contract_id, status);
+create index if not exists idx_payments_status          on payments (status);
 
 -- ---------- In3D: filaments & print orders -----------------------------------
 
@@ -272,6 +287,26 @@ create table if not exists app_profile (
 -- thêm cột qua ALTER ... IF NOT EXISTS (idempotent, không mất dữ liệu).
 -- (Bảng projects/milestones/upwork_contracts đã hợp nhất vào contracts/payments —
 --  ALTER cũ của chúng gỡ bỏ; migrate 1 lần ở db/10_migrate_contracts.sql.)
+
+-- Payments hardening (A1/A3/B5): thêm CHECK cho DB đã tồn tại (constraint không có
+-- IF NOT EXISTS → guard qua pg_constraint). An toàn với dữ liệu hiện tại (chỉ amount>0).
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'payments_amount_xor_hours') then
+    alter table payments add constraint payments_amount_xor_hours check (status = 'cancelled' or num_nonnulls(amount, hours) = 1);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'payments_positive') then
+    alter table payments add constraint payments_positive check (status = 'cancelled' or coalesce(amount, hours) > 0);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'payments_billed_frozen') then
+    alter table payments add constraint payments_billed_frozen check (
+      status not in ('billed','received')
+      or (fx_rate is not null and amount_vnd is not null));
+  end if;
+end $$;
+create index if not exists idx_payments_contract        on payments (contract_id);
+create index if not exists idx_payments_contract_status on payments (contract_id, status);
+create index if not exists idx_payments_status          on payments (status);
 
 -- Chốt theo tháng (Phase 1/2): khoá tháng + snapshot dòng tiền + as-of.
 alter table month_keys           add column if not exists closed_at timestamptz;

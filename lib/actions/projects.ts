@@ -165,6 +165,15 @@ export async function billPayment(id: string, monthKey: string) {
   return { ok: true };
 }
 
+/** Bill mọi đợt draft của 1 contract trong 1 lần (chốt tháng nhanh). Trả số đợt đã bill. */
+export async function billContractDrafts(contractId: string, monthKey: string) {
+  const sb = await createClient();
+  const { data, error } = await sb.rpc("bill_contract_drafts", { p_contract_id: contractId, p_month_key: monthKey });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true, count: Number(data ?? 0) };
+}
+
 export async function collectPayment(id: string, accountId: string) {
   const sb = await createClient();
   const { error } = await sb.rpc("collect_payment", { p_id: id, p_account_id: accountId });

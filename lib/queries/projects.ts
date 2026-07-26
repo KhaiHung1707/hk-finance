@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 /** Đợt chi trả (gộp milestone cũ + đợt Upwork/retainer). */
@@ -40,6 +41,8 @@ export type ContractFinance = {
   outstanding_vnd: number;
   payment_count: number;
   payment_paid: number;
+  draft_count: number; // đợt chưa bill — cho nút "Bill tất cả" + KPI
+  next_due: string | null; // hạn dự kiến gần nhất còn mở
   source: string | null;
   payments: Payment[];
 };
@@ -66,8 +69,11 @@ function mapPayment(p: Record<string, unknown>): Payment {
   };
 }
 
-/** Lấy contracts + payments. `model` lọc: undefined=all, 'fixed_milestones'=tab Projects, else=tab Upwork. */
-export async function getContracts(): Promise<ContractFinance[]> {
+/**
+ * Lấy contracts + payments. Bọc React.cache → gọi nhiều lần trong 1 request
+ * (getProjects + getUpworkContracts) chỉ 2 round-trip thay vì 4.
+ */
+export const getContracts = cache(async function getContracts(): Promise<ContractFinance[]> {
   const sb = await createClient();
   const [{ data: fin, error: e1 }, { data: pays, error: e2 }] = await Promise.all([
     sb.from("v_contract_finance").select("*"),
@@ -101,10 +107,12 @@ export async function getContracts(): Promise<ContractFinance[]> {
     outstanding_vnd: Number(c.outstanding_vnd),
     payment_count: Number(c.payment_count),
     payment_paid: Number(c.payment_paid),
+    draft_count: Number(c.draft_count ?? 0),
+    next_due: c.next_due ?? null,
     source: c.source ?? null,
     payments: byContract.get(c.id) ?? [],
   }));
-}
+});
 
 /** Contracts model fixed_milestones (tab Projects). */
 export async function getProjects(): Promise<ContractFinance[]> {

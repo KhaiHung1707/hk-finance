@@ -194,9 +194,13 @@ create or replace function create_payment(
 language plpgsql security definer set search_path = public as $$
 declare v_id uuid;
 begin
-  if p_amount is not null and p_amount < 0 then raise exception 'create_payment: amount không âm'; end if;
-  if p_hours  is not null and p_hours  < 0 then raise exception 'create_payment: hours không âm'; end if;
-  if p_amount is null and p_hours is null then raise exception 'create_payment: cần amount hoặc hours'; end if;
+  -- A1: chặn 0 (không chỉ âm) — đợt phải có giá trị dương, tránh sinh income 0đ khi bill.
+  if p_amount is not null and p_amount <= 0 then raise exception 'create_payment: amount phải > 0'; end if;
+  if p_hours  is not null and p_hours  <= 0 then raise exception 'create_payment: hours phải > 0'; end if;
+  -- A3: đúng MỘT trong amount/hours (XOR). DB cũng ép bằng CHECK; guard đây cho thông báo rõ.
+  if num_nonnulls(p_amount, p_hours) <> 1 then
+    raise exception 'create_payment: cần đúng một trong amount hoặc hours';
+  end if;
   if p_period_month is not null then perform ensure_month(p_period_month); end if;
   insert into payments(contract_id, kind, name, amount, hours, period_start, period_end,
                        period_month, due_on, status, sort)
@@ -217,6 +221,12 @@ begin
   select status into v_status from payments where id = p_id for update;
   if not found then raise exception 'update_payment: đợt không tồn tại'; end if;
   if v_status <> 'draft' then raise exception 'update_payment: chỉ sửa được đợt draft'; end if;
+  -- A1/A3: cùng ràng buộc như create — dương + đúng một trong amount/hours.
+  if p_amount is not null and p_amount <= 0 then raise exception 'update_payment: amount phải > 0'; end if;
+  if p_hours  is not null and p_hours  <= 0 then raise exception 'update_payment: hours phải > 0'; end if;
+  if num_nonnulls(p_amount, p_hours) <> 1 then
+    raise exception 'update_payment: cần đúng một trong amount hoặc hours';
+  end if;
   update payments set name = p_name, amount = p_amount, hours = p_hours, due_on = p_due_on where id = p_id;
 end $$;
 
@@ -258,6 +268,8 @@ begin
     if v_amount is null then raise exception 'bill_payment: cần amount'; end if;
     v_gross := v_amount;
   end if;
+  -- A1: gross phải > 0 — không bao giờ ghi income tx 0đ vào ledger.
+  if v_gross is null or v_gross <= 0 then raise exception 'bill_payment: giá trị đợt phải > 0'; end if;
 
   -- (b) FEE: contract.fee_pct; model Upwork (one_shot/hourly/retainer) fallback settings.
   v_fee := coalesce(v_fee_pct,
@@ -299,36 +311,64 @@ end $$;
 
 create or replace function cancel_payment(p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_tx uuid;
+declare v_tx uuid; v_status text;
 begin
-  select income_tx_id into v_tx from payments where id = p_id;
+  select income_tx_id, status into v_tx, v_status from payments where id = p_id for update;
+  if not found then raise exception 'cancel_payment: đợt không tồn tại'; end if;
+  -- B5: không huỷ đợt đã THU (tiền đã vào tài khoản) — phải rollback về billed trước.
+  if v_status = 'received' then raise exception 'cancel_payment: đợt đã thu — lùi (rollback) trước khi huỷ'; end if;
   update payments set status = 'cancelled' where id = p_id;
   if v_tx is not null then update transactions set status = 'cancelled' where id = v_tx; end if;
 end $$;
 
+-- C1: bulk bill — bill mọi đợt DRAFT của 1 contract trong 1 lần (chốt tháng nhanh).
+-- Bỏ qua đợt không phải draft. Trả số đợt đã bill. Từng đợt vẫn qua bill_payment
+-- (freeze fx/guard riêng). Lỗi 1 đợt → toàn bộ rollback (atomic trong RPC).
+create or replace function bill_contract_drafts(p_contract_id uuid, p_month_key text)
+returns int language plpgsql security definer set search_path = public as $$
+declare v_pm record; v_n int := 0;
+begin
+  perform ensure_month(p_month_key);
+  for v_pm in select id from payments where contract_id = p_contract_id and status = 'draft' order by sort, id loop
+    perform bill_payment(v_pm.id, p_month_key);
+    v_n := v_n + 1;
+  end loop;
+  return v_n;
+end $$;
+
 -- ---------- generate_retainer_payments (Structure retainer tháng) ------------
--- Sinh 1 đợt draft/tháng cho dải [from..to] theo month_keys.sort. IDEMPOTENT:
--- on conflict (contract_id, period_month) do nothing. Chỉ sinh draft — bill thủ công.
+-- Sinh 1 đợt draft/tháng cho dải [from..to]. IDEMPOTENT: on conflict do nothing.
+-- A2: TỰ SINH chuỗi tháng từ from→to và ensure_month TỪNG tháng — không dựa vào
+-- month_keys đã tồn tại (trước đây bỏ sót tháng giữa dải nếu chưa được tạo).
 create or replace function generate_retainer_payments(
   p_contract_id uuid, p_from_month text, p_to_month text
 ) returns int
 language plpgsql security definer set search_path = public as $$
-declare v_amount numeric; v_model text; v_from int; v_to int; v_mk record; v_n int := 0;
+declare v_amount numeric; v_model text;
+        v_fy int; v_fm int; v_ty int; v_tm int; v_y int; v_m int; v_key text; v_n int := 0;
 begin
   select retainer_amount, payment_model into v_amount, v_model from contracts where id = p_contract_id;
   if not found then raise exception 'generate_retainer: contract không tồn tại'; end if;
   if v_model <> 'monthly_retainer' then raise exception 'generate_retainer: contract không phải monthly_retainer'; end if;
-  if v_amount is null then raise exception 'generate_retainer: chưa nhập retainer_amount'; end if;
-  perform ensure_month(p_from_month); perform ensure_month(p_to_month);
-  select sort into v_from from month_keys where key = p_from_month;
-  select sort into v_to   from month_keys where key = p_to_month;
-  if v_from > v_to then raise exception 'generate_retainer: from > to'; end if;
+  if v_amount is null or v_amount <= 0 then raise exception 'generate_retainer: retainer_amount phải > 0'; end if;
 
-  for v_mk in select key from month_keys where sort between v_from and v_to order by sort loop
+  -- parse 'T7/26' → year/month cho cả hai đầu.
+  v_fm := split_part(replace(p_from_month,'T',''), '/', 1)::int;
+  v_fy := 2000 + split_part(p_from_month, '/', 2)::int;
+  v_tm := split_part(replace(p_to_month,'T',''), '/', 1)::int;
+  v_ty := 2000 + split_part(p_to_month, '/', 2)::int;
+  if (v_fy*100 + v_fm) > (v_ty*100 + v_tm) then raise exception 'generate_retainer: from > to'; end if;
+
+  v_y := v_fy; v_m := v_fm;
+  while (v_y*100 + v_m) <= (v_ty*100 + v_tm) loop
+    v_key := 'T' || v_m || '/' || lpad((v_y - 2000)::text, 2, '0');
+    perform ensure_month(v_key);  -- tạo tháng nếu chưa có → không bỏ sót đợt
     insert into payments(contract_id, kind, name, amount, period_month, status, sort)
-    values (p_contract_id, 'monthly', v_mk.key, v_amount, v_mk.key, 'draft', 0)
+    values (p_contract_id, 'monthly', v_key, v_amount, v_key, 'draft', 0)
     on conflict (contract_id, period_month) where period_month is not null do nothing;
     if found then v_n := v_n + 1; end if;
+    -- tháng kế
+    if v_m = 12 then v_m := 1; v_y := v_y + 1; else v_m := v_m + 1; end if;
   end loop;
   return v_n;
 end $$;

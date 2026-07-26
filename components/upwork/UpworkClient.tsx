@@ -13,12 +13,15 @@ import {
   deleteContract,
   createPayment,
   billPayment,
+  billContractDrafts,
   collectPayment,
   cancelPayment,
   setPaymentDueOn,
   generateRetainerPayments,
 } from "@/lib/actions/projects";
 import { rollbackStatus } from "@/lib/actions/ledger";
+import { useActionRunner, SuccessToast } from "@/components/ui/useActionRunner";
+import { ContractOverview, useContractFilter } from "@/components/projects/ContractOverview";
 import type { ContractFinance, Payment, PaymentModel } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
 
@@ -61,6 +64,8 @@ export function UpworkClient({
   fxUsd: number;
   feePctDefault: number;
 }) {
+  const { run, confirmRun, pending, toast } = useActionRunner();
+  const { filter, setFilter, filtered } = useContractFilter(contracts);
   const [edit, setEdit] = useState<EditState | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -80,11 +85,6 @@ export function UpworkClient({
   // collect
   const [collect, setCollect] = useState<{ id: string; label: string; amountVnd: number } | null>(null);
   const [collectAccount, setCollectAccount] = useState("");
-
-  async function doAction(fn: () => Promise<{ ok: boolean; error?: string }>) {
-    const res = await fn();
-    if (!res.ok) alert(res.error);
-  }
 
   function openNew() {
     setEdit({ id: null, client: "", name: "", paymentModel: "one_shot", hourlyRate: "", feePct: "", retainerAmount: "" });
@@ -182,13 +182,22 @@ export function UpworkClient({
         </button>
       </HeaderPortal>
 
+      <SuccessToast toast={toast} />
+
+      <ContractOverview contracts={contracts} filter={filter} setFilter={setFilter} shownCount={filtered.length} />
+
       {contracts.length === 0 && (
         <div className="bg-card border border-card-border rounded-[18px] p-8 text-center text-[13px] text-muted">
           Chưa có hợp đồng Upwork. Bấm “New contract”.
         </div>
       )}
+      {contracts.length > 0 && filtered.length === 0 && (
+        <div className="bg-card border border-card-border rounded-[18px] p-6 text-center text-[13px] text-muted">
+          Không có hợp đồng khớp bộ lọc.
+        </div>
+      )}
 
-      {contracts.map((c) => {
+      {filtered.map((c) => {
         const fee = c.fee_pct ?? feePctDefault;
         return (
           <div key={c.id} className="bg-card border border-card-border rounded-[18px] p-[22px]">
@@ -222,6 +231,17 @@ export function UpworkClient({
                     {fmt(c.outstanding_vnd)}
                   </div>
                 </div>
+                {c.draft_count > 1 && (
+                  <button
+                    onClick={() => run(() => billContractDrafts(c.id, monthKey), { key: `bulk-${c.id}`, ok: `Đã bill ${c.draft_count} đợt` })}
+                    disabled={pending(`bulk-${c.id}`)}
+                    title="Bill mọi đợt nháp"
+                    className="flex items-center gap-[6px] bg-primary-dark text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-[#0A211C] disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <i className="ph-duotone ph-lightning" aria-hidden />
+                    {pending(`bulk-${c.id}`) ? "…" : `Bill ${c.draft_count} đợt`}
+                  </button>
+                )}
                 <button
                   onClick={() => openEdit(c)}
                   className="flex items-center gap-[6px] bg-transparent text-ink-soft border border-card-border rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:border-primary hover:text-primary"
@@ -267,21 +287,21 @@ export function UpworkClient({
                     </div>
                     <Badge bg={sm.bg} fg={sm.fg}>{sm.label}</Badge>
                     {(p.status === "draft" || p.status === "billed") && (
-                      <DueDateButton value={p.due_on} onSave={(d) => doAction(() => setPaymentDueOn(p.id, d))} size={30} />
+                      <DueDateButton value={p.due_on} onSave={(d) => run(() => setPaymentDueOn(p.id, d))} size={30} />
                     )}
                     {p.status === "draft" && (
                       <button
-                        onClick={() => doAction(() => billPayment(p.id, monthKey))}
-                        disabled={busy}
+                        onClick={() => run(() => billPayment(p.id, monthKey), { key: `pay-${p.id}`, ok: "Đã bill đợt" })}
+                        disabled={pending(`pay-${p.id}`)}
                         className="bg-primary-dark text-white border-0 rounded-full px-[12px] py-[6px] text-[11px] font-bold cursor-pointer hover:bg-[#0A211C] disabled:opacity-50"
                       >
-                        Bill
+                        {pending(`pay-${p.id}`) ? "…" : "Bill"}
                       </button>
                     )}
                     {p.status === "billed" && (
                       <button
                         onClick={() => { setCollect({ id: p.id, label: `${c.client} · ${p.name}`, amountVnd: vnd }); setCollectAccount(""); }}
-                        disabled={busy}
+                        disabled={pending(`pay-${p.id}`)}
                         className="bg-primary text-white border-0 rounded-full px-[12px] py-[6px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover disabled:opacity-50"
                       >
                         Collect
@@ -291,10 +311,13 @@ export function UpworkClient({
                       <button
                         onClick={() => {
                           const back = p.status === "received" ? "billed" : "draft";
-                          if (confirm(`Lùi "${p.name}" từ ${p.status} → ${back}?${p.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`))
-                            doAction(() => rollbackStatus("payments", p.id));
+                          confirmRun(
+                            `Lùi "${p.name}" từ ${p.status} → ${back}?${p.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`,
+                            () => rollbackStatus("payments", p.id),
+                            { key: `pay-${p.id}` }
+                          );
                         }}
-                        disabled={busy}
+                        disabled={pending(`pay-${p.id}`)}
                         title="Lùi 1 bước"
                         className="bg-chip text-ink-soft border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary disabled:opacity-50"
                       >
@@ -303,8 +326,8 @@ export function UpworkClient({
                     )}
                     {(p.status === "draft" || p.status === "billed") && (
                       <button
-                        onClick={() => { if (confirm(`Huỷ đợt "${p.name}"?`)) doAction(() => cancelPayment(p.id)); }}
-                        disabled={busy}
+                        onClick={() => confirmRun(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: `pay-${p.id}` })}
+                        disabled={pending(`pay-${p.id}`)}
                         title="Huỷ đợt"
                         className="bg-chip text-[#B4573B] border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#F7E3DC] disabled:opacity-50"
                       >
@@ -454,7 +477,7 @@ export function UpworkClient({
                 variant="primary"
                 className="flex-1"
                 disabled={!collectAccount}
-                onClick={async () => { await doAction(() => collectPayment(collect.id, collectAccount)); setCollect(null); }}
+                onClick={async () => { await run(() => collectPayment(collect.id, collectAccount), { ok: "Đã thu vào tài khoản" }); setCollect(null); }}
               >
                 Confirm & add to ledger
               </Button>

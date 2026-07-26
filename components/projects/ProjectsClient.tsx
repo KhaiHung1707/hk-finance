@@ -15,11 +15,14 @@ import {
   updatePayment,
   deletePayment,
   billPayment,
+  billContractDrafts,
   collectPayment,
   cancelPayment,
   setPaymentDueOn,
 } from "@/lib/actions/projects";
 import { rollbackStatus } from "@/lib/actions/ledger";
+import { useActionRunner, SuccessToast } from "@/components/ui/useActionRunner";
+import { ContractOverview, useContractFilter } from "@/components/projects/ContractOverview";
 import type { ContractFinance, Payment } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
 
@@ -76,6 +79,8 @@ export function ProjectsClient({
   sources: Ref[];
   fx: Record<string, number>;
 }) {
+  const { run, confirmRun, pending, toast } = useActionRunner();
+  const { filter, setFilter, filtered } = useContractFilter(projects);
   const [edit, setEdit] = useState<EditState | null>(null);
   const [newMsName, setNewMsName] = useState("");
   const [newMsAmount, setNewMsAmount] = useState("");
@@ -84,6 +89,7 @@ export function ProjectsClient({
   const [collectAccount, setCollectAccount] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // giữ doAction cho các nút inline modal (sửa/xoá milestone trong edit) — dùng run cho vòng đời chính.
   async function doAction(fn: () => Promise<{ ok: boolean; error?: string }>) {
     const res = await fn();
     if (!res.ok) alert(res.error);
@@ -166,13 +172,22 @@ export function ProjectsClient({
         </button>
       </HeaderPortal>
 
+      <SuccessToast toast={toast} />
+
+      <ContractOverview contracts={projects} filter={filter} setFilter={setFilter} shownCount={filtered.length} />
+
       {projects.length === 0 && (
         <div className="bg-card border border-card-border rounded-[18px] p-8 text-center text-[13px] text-muted">
           Chưa có dự án. Bấm “New project”.
         </div>
       )}
+      {projects.length > 0 && filtered.length === 0 && (
+        <div className="bg-card border border-card-border rounded-[18px] p-6 text-center text-[13px] text-muted">
+          Không có dự án khớp bộ lọc.
+        </div>
+      )}
 
-      {projects.map((p) => {
+      {filtered.map((p) => {
         const sm = projStatusStyle[p.status] ?? projStatusStyle.active;
         const pctColl =
           p.contract_value_vnd > 0
@@ -205,6 +220,17 @@ export function ProjectsClient({
                 <Badge bg={sm.bg} fg={sm.fg}>
                   {sm.label}
                 </Badge>
+                {p.draft_count > 1 && (
+                  <button
+                    onClick={() => run(() => billContractDrafts(p.id, monthKey), { key: `bulk-${p.id}`, ok: `Đã bill ${p.draft_count} milestone` })}
+                    disabled={pending(`bulk-${p.id}`)}
+                    title="Bill mọi milestone nháp"
+                    className="flex items-center gap-[6px] bg-primary-dark text-white border-0 rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:bg-[#0A211C] disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <i className="ph-duotone ph-lightning" aria-hidden />
+                    {pending(`bulk-${p.id}`) ? "…" : `Bill ${p.draft_count}`}
+                  </button>
+                )}
                 <button
                   onClick={() => openEdit(p)}
                   className="flex items-center gap-[6px] bg-transparent text-ink-soft border border-card-border rounded-full px-[13px] py-[7px] text-[11px] font-bold cursor-pointer hover:border-primary hover:text-primary"
@@ -273,15 +299,15 @@ export function ProjectsClient({
                       </div>
                     </div>
                     {(m.status === "draft" || m.status === "billed") && (
-                      <DueDateButton value={m.due_on} onSave={(d) => doAction(() => setPaymentDueOn(m.id, d))} />
+                      <DueDateButton value={m.due_on} onSave={(d) => run(() => setPaymentDueOn(m.id, d))} />
                     )}
                     {m.status === "draft" && (
                       <button
-                        onClick={() => doAction(() => billPayment(m.id, monthKey))}
-                        disabled={busy}
+                        onClick={() => run(() => billPayment(m.id, monthKey), { key: `pay-${m.id}`, ok: "Đã bill milestone" })}
+                        disabled={pending(`pay-${m.id}`)}
                         className="ml-[6px] bg-primary-dark text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-[#0A211C] whitespace-nowrap disabled:opacity-50"
                       >
-                        Bill
+                        {pending(`pay-${m.id}`) ? "…" : "Bill"}
                       </button>
                     )}
                     {m.status === "billed" && (
@@ -290,7 +316,7 @@ export function ProjectsClient({
                           setCollect({ id: m.id, label: `${p.name} · ${m.name}`, amountVnd: vnd });
                           setCollectAccount("");
                         }}
-                        disabled={busy}
+                        disabled={pending(`pay-${m.id}`)}
                         className="ml-[6px] bg-primary text-white border-0 rounded-full px-[11px] py-[6px] text-[10.5px] font-bold cursor-pointer hover:bg-primary-hover whitespace-nowrap disabled:opacity-50"
                       >
                         Collect
@@ -312,10 +338,13 @@ export function ProjectsClient({
                       <button
                         onClick={() => {
                           const back = m.status === "received" ? "billed" : "draft";
-                          if (confirm(`Lùi "${m.name}" từ ${m.status} → ${back}?${m.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`))
-                            doAction(() => rollbackStatus("payments", m.id));
+                          confirmRun(
+                            `Lùi "${m.name}" từ ${m.status} → ${back}?${m.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`,
+                            () => rollbackStatus("payments", m.id),
+                            { key: `pay-${m.id}` }
+                          );
                         }}
-                        disabled={busy}
+                        disabled={pending(`pay-${m.id}`)}
                         aria-label="Lùi trạng thái"
                         title="Lùi 1 bước trạng thái"
                         className="ml-[2px] bg-transparent text-muted border-0 rounded-full w-[26px] h-[26px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary disabled:opacity-50"
@@ -325,10 +354,8 @@ export function ProjectsClient({
                     )}
                     {(m.status === "draft" || m.status === "billed") && (
                       <button
-                        onClick={() => {
-                          if (confirm(`Huỷ milestone "${m.name}"?`)) doAction(() => cancelPayment(m.id));
-                        }}
-                        disabled={busy}
+                        onClick={() => confirmRun(`Huỷ milestone "${m.name}"?`, () => cancelPayment(m.id), { key: `pay-${m.id}` })}
+                        disabled={pending(`pay-${m.id}`)}
                         aria-label="Huỷ milestone"
                         title="Huỷ milestone"
                         className="ml-[2px] bg-transparent text-muted border-0 rounded-full w-[26px] h-[26px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#F7E3DC] hover:text-[#B4573B] disabled:opacity-50"
@@ -535,7 +562,7 @@ export function ProjectsClient({
                 className="flex-1"
                 disabled={!collectAccount}
                 onClick={async () => {
-                  await doAction(() => collectPayment(collect.id, collectAccount));
+                  await run(() => collectPayment(collect.id, collectAccount), { ok: "Đã thu vào tài khoản" });
                   setCollect(null);
                 }}
               >
