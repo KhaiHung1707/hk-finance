@@ -93,6 +93,24 @@ export async function deleteContract(id: string) {
   return { ok: true };
 }
 
+/** Kết thúc hợp đồng (→ done). Chặn nếu còn đợt draft. */
+export async function endContract(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("end_contract", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
+/** Mở lại hợp đồng đã kết thúc (done → active). */
+export async function reactivateContract(id: string) {
+  const sb = await createClient();
+  const { error } = await sb.rpc("reactivate_contract", { p_id: id });
+  if (error) return { ok: false, error: error.message };
+  rev();
+  return { ok: true };
+}
+
 // ---------------- Payment CRUD + lifecycle ----------------
 
 export async function createPayment(input: {

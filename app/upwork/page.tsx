@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Trang Upwork đã gộp vào /projects (tab Upwork). Giữ route cũ → redirect.
+// Upwork đã gộp hoàn toàn vào /projects (1 danh sách hợp đồng, lọc theo loại). Redirect.
 export default function UpworkPage() {
-  redirect("/projects?tab=upwork");
+  redirect("/projects");
 }

@@ -182,6 +182,29 @@ begin
   delete from contracts where id = p_id; -- payments draft/cancelled cascade
 end $$;
 
+-- end_contract: kết thúc hợp đồng (status → 'done'). CHẶN nếu còn đợt DRAFT chưa xử
+-- lý (phải bill hoặc huỷ hết trước) — tránh bỏ quên khoản chưa chốt.
+create or replace function end_contract(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  select status into v_status from contracts where id = p_id for update;
+  if not found then raise exception 'end_contract: hợp đồng không tồn tại'; end if;
+  if v_status = 'done' then return; end if; -- idempotent
+  if exists (select 1 from payments where contract_id = p_id and status = 'draft') then
+    raise exception 'end_contract: còn đợt nháp chưa xử lý — bill hoặc huỷ hết trước khi kết thúc';
+  end if;
+  update contracts set status = 'done' where id = p_id;
+end $$;
+
+-- reactivate_contract: mở lại hợp đồng đã kết thúc (done → active).
+create or replace function reactivate_contract(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  update contracts set status = 'active' where id = p_id and status = 'done';
+  if not found then raise exception 'reactivate_contract: chỉ mở lại được hợp đồng đã kết thúc'; end if;
+end $$;
+
 -- ---------- Payment CRUD -----------------------------------------------------
 -- create_payment: thêm 1 đợt (milestone/one_shot/weekly/monthly). Với hourly dùng
 -- p_hours; các loại khác dùng p_amount. Đợt tuần có period_start/end.

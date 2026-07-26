@@ -114,6 +114,11 @@ export const getContracts = cache(async function getContracts(): Promise<Contrac
   }));
 });
 
+/** 1 contract theo id (cho trang detail). null nếu không có. */
+export async function getContract(id: string): Promise<ContractFinance | null> {
+  return (await getContracts()).find((c) => c.id === id) ?? null;
+}
+
 /** Contracts model fixed_milestones (tab Projects). */
 export async function getProjects(): Promise<ContractFinance[]> {
   return (await getContracts()).filter((c) => c.payment_model === "fixed_milestones");

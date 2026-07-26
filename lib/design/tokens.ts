@@ -94,7 +94,7 @@ export const navItems = [
   { href: "/", label: "Dashboard", icon: "ph-duotone ph-squares-four" },
   { href: "/ledger", label: "Ledger/Account", icon: "ph-duotone ph-notebook" },
   { href: "/in3d", label: "In3D", icon: "ph-duotone ph-cube-transparent" },
-  { href: "/projects", label: "Projects/Upwork", icon: "ph-duotone ph-briefcase" },
+  { href: "/projects", label: "Projects", icon: "ph-duotone ph-briefcase" },
   { href: "/investments", label: "Invest", icon: "ph-duotone ph-chart-line-up" },
   { href: "/forecast", label: "Forecast", icon: "ph-duotone ph-chart-line" },
   { href: "/calendar", label: "Lịch", icon: "ph-duotone ph-calendar-dots" },
