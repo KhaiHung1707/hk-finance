@@ -7,7 +7,7 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
-import { useActionRunner, SuccessToast } from "@/components/ui/useActionRunner";
+import { useActionRunner, SuccessToast, ConfirmHost } from "@/components/ui/useActionRunner";
 import { ContractOverview, useContractFilter } from "@/components/projects/ContractOverview";
 import { PaymentRows, MODELS, modelLabel, modelIcon, contractStatusStyle } from "@/components/projects/contract-shared";
 import { ContractTableView, ContractTimelineView, type ProjectView } from "@/components/projects/contract-views";
@@ -62,7 +62,8 @@ export function ContractsClient({
   feePctDefault: number;
   todayIso: string;
 }) {
-  const { run, pending, toast } = useActionRunner();
+  const runner = useActionRunner();
+  const { run, pending, toast } = runner;
   const { filter, setFilter, filtered } = useContractFilter(contracts);
   const [view, setView] = useState<ProjectView>("list");
   const [edit, setEdit] = useState<EditState | null>(null);
@@ -137,6 +138,7 @@ export function ContractsClient({
       </HeaderPortal>
 
       <SuccessToast toast={toast} />
+      <ConfirmHost host={runner} />
       <ContractOverview contracts={contracts} filter={filter} setFilter={setFilter} shownCount={filtered.length} />
 
       {/* View switcher — nhiều góc nhìn khi dữ liệu dày */}
@@ -246,15 +248,13 @@ export function ContractsClient({
             )}
 
             {/* Đợt + thao tác (dùng chung với detail) */}
-            <PaymentRows
+            <PaymentRows host={runner}
               contract={c}
               monthKey={monthKey}
               accounts={accounts}
               fx={fx}
               fxUsd={fxUsd}
               feePctDefault={feePctDefault}
-              run={run}
-              pending={pending}
               variant="list"
             />
           </div>

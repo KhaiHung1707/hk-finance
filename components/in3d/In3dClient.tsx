@@ -7,8 +7,8 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { useActionRunner, ConfirmHost } from "@/components/ui/useActionRunner";
 import { ReceiveModal } from "@/components/ledger/ReceiveModal";
-import { useRouter } from "next/navigation";
 import { buyFilament, createPrintOrder, cancelPrintOrder } from "@/lib/actions/in3d";
 import { rollbackStatus } from "@/lib/actions/ledger";
 import type { FilamentStock, PrintOrder } from "@/lib/queries/in3d";
@@ -29,7 +29,8 @@ export function In3dClient({
   orders: PrintOrder[];
   accounts: Ref[];
 }) {
-  const router = useRouter();
+  const runner = useActionRunner();
+  const { confirmRun } = runner;
   const [tab, setTab] = useState<"orders" | "stock">("orders");
   const [modal, setModal] = useState<"buy" | "order" | null>(null);
   const [receiveTx, setReceiveTx] = useState<{ id: string; amount: number; label: string } | null>(null);
@@ -115,6 +116,7 @@ export function In3dClient({
 
   return (
     <>
+      <ConfirmHost host={runner} />
       <HeaderPortal>
         <button
           onClick={() => setModal("buy")}
@@ -256,12 +258,13 @@ export function In3dClient({
                   )}
                   {o.status === "received" && (
                     <button
-                      onClick={async () => {
-                        if (!confirm(`Lùi "${o.name}" từ received → pending? Tiền về chờ thu.`)) return;
-                        const res = await rollbackStatus("print_orders", o.id);
-                        if (!res.ok) return alert(res.error);
-                        router.refresh();
-                      }}
+                      onClick={() =>
+                        confirmRun(
+                          `Lùi "${o.name}" từ received → pending? Tiền về chờ thu.`,
+                          () => rollbackStatus("print_orders", o.id),
+                          { danger: true, title: "Lùi trạng thái", confirmLabel: "Lùi về chờ thu" }
+                        )
+                      }
                       aria-label="Lùi trạng thái"
                       title="Lùi về chờ thu"
                       className="bg-chip text-ink-soft border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary"

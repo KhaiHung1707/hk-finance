@@ -7,6 +7,7 @@ import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { useActionRunner, ConfirmHost, SuccessToast } from "@/components/ui/useActionRunner";
 import { GoldLotsCard } from "@/components/assets/GoldLotsCard";
 import { BuyGoldButton } from "@/components/assets/BuyGoldButton";
 import {
@@ -63,11 +64,12 @@ export function InvestmentsClient({
   goldSuggestedPrice: number;
 }) {
   const router = useRouter();
+  const runner = useActionRunner();
+  const { confirmRun } = runner;
   const [tab, setTab] = useState<"deposits" | "stocks" | "gold">("deposits");
   const [modal, setModal] = useState<ModalKind>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [showSettled, setShowSettled] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -102,28 +104,25 @@ export function InvestmentsClient({
     setModal(null);
     setErr(null);
   }
+  // Giữ inline err/busy cho form trong modal; khi thành công đóng modal rồi để runner
+  // lo toast (SuccessToast) + refresh. Lỗi vẫn hiển thị inline trong modal như cũ.
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, okToast?: string) {
     setBusy(true);
     setErr(null);
     const res = await fn();
-    setBusy(false);
     if (!res.ok) {
+      setBusy(false);
       setErr(res.error ?? "Lỗi");
       return;
     }
     close();
-    if (okToast) {
-      setToast(okToast);
-      setTimeout(() => setToast(null), 4000);
-    }
-    router.refresh();
+    setBusy(false);
+    // res đã ok — dùng runner chỉ để hiện toast + router.refresh() nhất quán.
+    await runner.run(async () => res, { ok: okToast });
   }
 
-  async function del(confirmMsg: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
-    if (!confirm(confirmMsg)) return;
-    const res = await fn();
-    if (!res.ok) return alert(res.error ?? "Lỗi xoá");
-    router.refresh();
+  function del(confirmMsg: string, fn: () => Promise<{ ok: boolean; error?: string }>) {
+    confirmRun(confirmMsg, fn, { danger: true, title: "Xoá", confirmLabel: "Xoá" });
   }
 
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? "?";
@@ -160,12 +159,8 @@ export function InvestmentsClient({
         <BuyGoldButton accounts={accounts} monthKey={monthKey} suggestedPrice={goldSuggestedPrice} />
       )}
 
-      {toast && (
-        <div className="bg-[#DFF2E7] border border-[#B6E0C8] text-[#1F7A5C] rounded-[12px] px-4 py-3 text-[13px] font-semibold flex items-center gap-2">
-          <i className="ph-duotone ph-check-circle" aria-hidden />
-          {toast}
-        </div>
-      )}
+      <ConfirmHost host={runner} />
+      <SuccessToast toast={runner.toast} />
 
       <div className="flex gap-[6px]" role="tablist">
         <button role="tab" aria-selected={tab === "deposits"} onClick={() => setTab("deposits")} className={tabBtn(tab === "deposits")}>

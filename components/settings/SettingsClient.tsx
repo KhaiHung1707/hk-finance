@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { fmt, full, pct } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
+import { useActionRunner, ConfirmHost } from "@/components/ui/useActionRunner";
 import { setFxRate, setUpworkFee, setGoldPrice, setAllocationTargets, setHouseGoal } from "@/lib/actions/settings";
 import type { SettingsBundle } from "@/lib/queries/settings";
 
@@ -17,6 +18,8 @@ function EditableValue({
   onSave: (v: number) => Promise<{ ok: boolean; error?: string }>;
   format?: (v: number) => string;
 }) {
+  const runner = useActionRunner();
+  const { notify } = runner;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
   const [busy, setBusy] = useState(false);
@@ -25,7 +28,7 @@ function EditableValue({
     setBusy(true);
     const res = await onSave(Number(draft) || 0);
     setBusy(false);
-    if (!res.ok) return alert(res.error);
+    if (!res.ok) return notify(res.error ?? "Lỗi lưu");
     setEditing(false);
   }
 
@@ -46,6 +49,7 @@ function EditableValue({
   }
   return (
     <div className="flex items-center gap-[6px]">
+      <ConfirmHost host={runner} />
       <input
         type="number"
         value={draft}
@@ -77,6 +81,8 @@ const ALLOC_META: Record<string, { label: string; color: string }> = {
 };
 
 export function SettingsClient({ data }: { data: SettingsBundle }) {
+  const runner = useActionRunner();
+  const { notify } = runner;
   const usd = data.fx.find((f) => f.ccy === "USD");
   const cad = data.fx.find((f) => f.ccy === "CAD");
 
@@ -89,7 +95,7 @@ export function SettingsClient({ data }: { data: SettingsBundle }) {
     setSavingTargets(true);
     const res = await setAllocationTargets(targets);
     setSavingTargets(false);
-    if (!res.ok) alert(res.error);
+    if (!res.ok) notify(res.error ?? "Lỗi lưu mục tiêu");
   }
 
   const rowIcon = "w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[16px]";
@@ -99,6 +105,7 @@ export function SettingsClient({ data }: { data: SettingsBundle }) {
       className="grid gap-[14px] items-start"
       style={{ gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))" }}
     >
+      <ConfirmHost host={runner} />
       {/* Rates & fees */}
       <div className="bg-card border border-card-border rounded-[18px] p-[22px]">
         <div className="text-[15px] font-bold mb-[6px]">Rates & fees</div>

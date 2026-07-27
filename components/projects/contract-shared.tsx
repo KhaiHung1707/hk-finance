@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/Button";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Field, Select, TextInput } from "@/components/ui/Field";
 import { DueDateButton } from "@/components/ui/DueDateButton";
+import { type ActionRunner } from "@/components/ui/useActionRunner";
 import {
   createPayment,
   addRetainerMonth,
+  updatePayment,
   billPayment,
   collectPayment,
   cancelPayment,
@@ -57,8 +59,6 @@ function isoAddDays(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-type Runner = (fn: () => Promise<{ ok: boolean; error?: string }>, opts?: { key?: string; ok?: string }) => Promise<{ ok: boolean; error?: string }>;
-type ConfirmRunner = (msg: string, fn: () => Promise<{ ok: boolean; error?: string }>, opts?: { key?: string; ok?: string }) => Promise<{ ok: boolean }>;
 
 /**
  * Danh sách đợt của 1 hợp đồng + thao tác (bill/collect/rollback/cancel/due) + form
@@ -72,9 +72,7 @@ export function PaymentRows({
   fx,
   fxUsd,
   feePctDefault,
-  run,
-  confirmRun,
-  pending,
+  host,
   variant = "list",
 }: {
   contract: ContractFinance;
@@ -83,11 +81,10 @@ export function PaymentRows({
   fx: Record<string, number>;
   fxUsd: number;
   feePctDefault: number;
-  run: Runner;
-  confirmRun?: ConfirmRunner;
-  pending: (key: string) => boolean;
+  host: ActionRunner;
   variant?: "list" | "detail";
 }) {
+  const { run, confirmRun, notify, pending } = host;
   const upwork = c.payment_model !== "fixed_milestones";
   const fee = c.fee_pct ?? (upwork ? feePctDefault : 0);
   // Hợp đồng đã kết thúc/huỷ → chặn thao tác tạo mới (bill/due); vẫn cho thu nốt (collect/rollback).
@@ -105,9 +102,6 @@ export function PaymentRows({
   const [collectAccount, setCollectAccount] = useState("");
   const [detailId, setDetailId] = useState<string | null>(null); // đợt đang xem chi tiết
 
-  const confirm2: ConfirmRunner =
-    confirmRun ?? ((msg, fn, opts) => (window.confirm(msg) ? run(fn, opts) : Promise.resolve({ ok: false })));
-
   function openCollect(p: Payment, vnd: number) {
     setCollect({ id: p.id, label: `${c.client} · ${p.name}`, amountVnd: vnd });
     setCollectAccount("");
@@ -117,7 +111,7 @@ export function PaymentRows({
     setBusy(true);
     let res;
     if (c.payment_model === "hourly_weekly") {
-      if (!pHours) { setBusy(false); return alert("Nhập số giờ"); }
+      if (!pHours) { setBusy(false); return notify("Nhập số giờ"); }
       const end = pWeekStart ? isoAddDays(pWeekStart, 6) : null;
       res = await createPayment({
         contractId: c.id, kind: "weekly",
@@ -126,11 +120,11 @@ export function PaymentRows({
       });
     } else if (c.payment_model === "monthly_retainer") {
       // retainer: mỗi tháng số tiền riêng — idempotent theo tháng (add_retainer_month).
-      if (!pMonth) { setBusy(false); return alert("Nhập tháng (vd T8/26)"); }
-      if (!pAmount) { setBusy(false); return alert("Nhập số tiền"); }
+      if (!pMonth) { setBusy(false); return notify("Nhập tháng (vd T8/26)"); }
+      if (!pAmount) { setBusy(false); return notify("Nhập số tiền"); }
       res = await addRetainerMonth(c.id, pMonth.trim(), Number(pAmount));
     } else {
-      if (!pAmount) { setBusy(false); return alert("Nhập số tiền"); }
+      if (!pAmount) { setBusy(false); return notify("Nhập số tiền"); }
       res = await createPayment({
         contractId: c.id,
         kind: c.payment_model === "fixed_milestones" ? "milestone" : "one_shot",
@@ -138,7 +132,7 @@ export function PaymentRows({
       });
     }
     setBusy(false);
-    if (!res.ok) return alert(res.error);
+    if (!res.ok) return notify(res.error ?? "Không thêm được đợt");
     setPName(""); setPAmount(""); setPHours(""); setPWeekStart(""); setAddOpen(false);
     run(async () => ({ ok: true })); // trigger refresh
   }
@@ -214,7 +208,7 @@ export function PaymentRows({
                 <button
                   onClick={() => {
                     const back = p.status === "received" ? "billed" : "draft";
-                    confirm2(`Lùi "${p.name}" từ ${p.status} → ${back}?${p.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`, () => rollbackStatus("payments", p.id), { key: k });
+                    confirmRun(`Lùi "${p.name}" từ ${p.status} → ${back}?${p.status === "received" ? " Tiền về chờ thu." : " Hoá đơn sẽ bị xoá."}`, () => rollbackStatus("payments", p.id), { key: k, title: "Lùi trạng thái", confirmLabel: "Lùi" });
                   }}
                   disabled={pending(k)} title="Lùi 1 bước"
                   className="bg-chip text-ink-soft border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#EDE8DC] hover:text-primary disabled:opacity-50">
@@ -222,7 +216,7 @@ export function PaymentRows({
                 </button>
               )}
               {(p.status === "draft" || p.status === "billed") && (
-                <button onClick={() => confirm2(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: k })} disabled={pending(k)} title="Huỷ đợt"
+                <button onClick={() => confirmRun(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: k, danger: true, title: "Huỷ đợt", confirmLabel: "Huỷ đợt" })} disabled={pending(k)} title="Huỷ đợt"
                   className="bg-chip text-[#B4573B] border-0 rounded-full w-[30px] h-[30px] flex items-center justify-center text-[13px] cursor-pointer hover:bg-[#F7E3DC] disabled:opacity-50">
                   <i className="ph-duotone ph-x-circle" aria-hidden />
                 </button>
@@ -297,9 +291,7 @@ export function PaymentRows({
         fxUsd={fxUsd}
         fee={fee}
         upwork={upwork}
-        run={run}
-        confirm2={confirm2}
-        pending={pending}
+        host={host}
         onClose={() => setDetailId(null)}
         onCollect={(p, vnd) => { setDetailId(null); openCollect(p, vnd); }}
       />
@@ -307,9 +299,9 @@ export function PaymentRows({
   );
 }
 
-/** Pop-up chi tiết 1 đợt: mọi trường + timeline + thao tác. */
+/** Pop-up chi tiết 1 đợt: mọi trường + timeline + thao tác + điều chỉnh số tiền. */
 function PaymentDetailModal({
-  payment: p, contract: c, monthKey, fx, fxUsd, fee, upwork, run, confirm2, pending, onClose, onCollect,
+  payment: p, contract: c, monthKey, fx, fxUsd, fee, upwork, host, onClose, onCollect,
 }: {
   payment: Payment | null;
   contract: ContractFinance;
@@ -318,12 +310,12 @@ function PaymentDetailModal({
   fxUsd: number;
   fee: number;
   upwork: boolean;
-  run: Runner;
-  confirm2: ConfirmRunner;
-  pending: (key: string) => boolean;
+  host: ActionRunner;
   onClose: () => void;
   onCollect: (p: Payment, vnd: number) => void;
 }) {
+  const { run, confirmRun, notify, pending } = host;
+  const [editVal, setEditVal] = useState<string | null>(null); // giá trị đang sửa (amount/hours)
   if (!p) return null;
   const sm = payStatusStyle[p.status];
   const k = `pay-${p.id}`;
@@ -366,6 +358,39 @@ function PaymentDetailModal({
         ))}
       </div>
 
+      {/* Điều chỉnh số tiền — đợt DRAFT sửa trực tiếp; đợt BILLED phải lùi trước */}
+      {p.status === "draft" && c.payment_model !== "hourly_weekly" && (
+        <div className="mb-3">
+          {editVal === null ? (
+            <button onClick={() => setEditVal(String(p.amount ?? ""))}
+              className="text-[12px] font-bold text-primary bg-fill-soft border border-card-border rounded-full px-[12px] py-[6px] cursor-pointer hover:border-primary">
+              <i className="ph-duotone ph-pencil-simple mr-1" aria-hidden /> Điều chỉnh số tiền
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 flex-wrap bg-fill-soft rounded-[12px] p-2">
+              <span className="text-[11px] text-muted font-semibold px-1">Số tiền ({c.currency}{c.payment_model === "monthly_retainer" ? "/tháng" : ""})</span>
+              <TextInput type="number" value={editVal} onChange={(e) => setEditVal(e.target.value)} className="max-w-[140px]" />
+              <Button variant="primary" disabled={pending(k)}
+                onClick={() => {
+                  const v = Number(editVal);
+                  if (!v || v <= 0) return notify("Số tiền phải > 0");
+                  const fn = c.payment_model === "monthly_retainer" && p.period_month
+                    ? () => addRetainerMonth(c.id, p.period_month!, v)
+                    : () => updatePayment({ id: p.id, name: p.name ?? "", amount: v });
+                  run(fn, { key: k, ok: "Đã cập nhật số tiền" }).then((r) => { if (r.ok) setEditVal(null); });
+                }}>Lưu</Button>
+              <Button variant="ghost" onClick={() => setEditVal(null)}>Huỷ</Button>
+            </div>
+          )}
+        </div>
+      )}
+      {p.status === "billed" && (
+        <div className="mb-3 text-[11px] text-[#8A6019] bg-[#FBF0DC] border border-[#EBD9AE] rounded-[10px] px-3 py-2 flex items-center gap-[7px]">
+          <i className="ph-duotone ph-info text-[#A5731F]" aria-hidden />
+          Muốn sửa số tiền: bấm “Lùi 1 bước” (về nháp) rồi điều chỉnh, sau đó Bill lại.
+        </div>
+      )}
+
       {/* Timeline ngày */}
       <div className="mb-3">
         <div className="text-[11px] font-bold text-muted uppercase tracking-[0.4px] mb-2">Timeline</div>
@@ -391,14 +416,14 @@ function PaymentDetailModal({
           <Button variant="ghost" className="flex-1"
             onClick={() => {
               const back = p.status === "received" ? "billed" : "draft";
-              confirm2(`Lùi "${p.name}" từ ${p.status} → ${back}?`, () => rollbackStatus("payments", p.id), { key: k }).then((r) => { if (r.ok) onClose(); });
+              confirmRun(`Lùi "${p.name}" từ ${p.status} → ${back}?`, () => rollbackStatus("payments", p.id), { key: k, title: "Lùi trạng thái", confirmLabel: "Lùi" }).then((r) => { if (r.ok) onClose(); });
             }}>
             Lùi 1 bước
           </Button>
         )}
         {(p.status === "draft" || p.status === "billed") && (
           <button
-            onClick={() => confirm2(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: k }).then((r) => { if (r.ok) onClose(); })}
+            onClick={() => confirmRun(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: k, danger: true, title: "Huỷ đợt", confirmLabel: "Huỷ đợt" }).then((r) => { if (r.ok) onClose(); })}
             className="bg-[#F7E3DC] text-[#B4573B] border-0 rounded-full px-[16px] py-[10px] text-[13px] font-bold cursor-pointer hover:bg-[#F0D2C6]">
             Huỷ
           </button>

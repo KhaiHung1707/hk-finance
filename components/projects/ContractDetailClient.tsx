@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Field, FieldRow, TextInput, Select, MoneyInput } from "@/components/ui/Field";
-import { useActionRunner, SuccessToast } from "@/components/ui/useActionRunner";
+import { useActionRunner, SuccessToast, ConfirmHost } from "@/components/ui/useActionRunner";
 import { PaymentRows, MODELS, modelLabel, modelIcon, contractStatusStyle } from "@/components/projects/contract-shared";
 import {
   updateContract,
@@ -36,7 +36,8 @@ export function ContractDetailClient({
   feePctDefault: number;
 }) {
   const router = useRouter();
-  const { run, confirmRun, pending, toast } = useActionRunner();
+  const runner = useActionRunner();
+  const { run, confirmRun, pending, toast } = runner;
   const upwork = c.payment_model !== "fixed_milestones";
   const fee = c.fee_pct ?? (upwork ? feePctDefault : 0);
   const sm = contractStatusStyle[c.status] ?? contractStatusStyle.active;
@@ -79,6 +80,7 @@ export function ContractDetailClient({
   return (
     <>
       <SuccessToast toast={toast} />
+      <ConfirmHost host={runner} />
 
       {/* Thanh điều hướng + hành động vòng đời hợp đồng */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -88,7 +90,7 @@ export function ContractDetailClient({
         <div className="flex items-center gap-2 flex-wrap">
           {c.status !== "done" && c.status !== "cancelled" && (
             <button
-              onClick={() => confirmRun("Kết thúc hợp đồng này? (phải xử lý hết đợt nháp trước)", () => endContract(c.id), { key: "end", ok: "Đã kết thúc hợp đồng" })}
+              onClick={() => confirmRun("Kết thúc hợp đồng này? (phải xử lý hết đợt nháp trước)", () => endContract(c.id), { key: "end", ok: "Đã kết thúc hợp đồng", title: "Kết thúc hợp đồng", confirmLabel: "Kết thúc" })}
               disabled={pending("end")}
               className="flex items-center gap-[6px] bg-fill-soft text-ink-soft border border-card-border rounded-full px-[14px] py-[8px] text-[12px] font-bold cursor-pointer hover:border-primary hover:text-primary disabled:opacity-50"
             >
@@ -115,7 +117,7 @@ export function ContractDetailClient({
               const r = await deleteContract(c.id);
               if (r.ok) router.push("/projects");
               return r;
-            }, { key: "del" })}
+            }, { key: "del", danger: true, title: "Xoá hợp đồng", confirmLabel: "Xoá" })}
             disabled={pending("del")}
             className="flex items-center gap-[6px] bg-[#F7E3DC] text-[#B4573B] border-0 rounded-full px-[14px] py-[8px] text-[12px] font-bold cursor-pointer hover:bg-[#F0D2C6] disabled:opacity-50"
           >
@@ -183,7 +185,7 @@ export function ContractDetailClient({
         </div>
         <PaymentRows
           contract={c} monthKey={monthKey} accounts={accounts} fx={fx} fxUsd={fxUsd}
-          feePctDefault={feePctDefault} run={run} confirmRun={confirmRun} pending={pending} variant="detail"
+          feePctDefault={feePctDefault} host={runner} variant="detail"
         />
       </div>
 

@@ -1,20 +1,35 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Modal, ModalActions } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
 
 type ActionResult = { ok: boolean; error?: string };
 
+type ConfirmState = {
+  message: string;
+  title?: string;
+  danger?: boolean;
+  confirmLabel?: string;
+} | null;
+
 /**
- * Hook dùng chung cho thao tác server-action: toast thành công, alert lỗi (Việt-hoá),
- * loading PER-ACTION theo key (không khoá cả trang), tự router.refresh() khi ok.
- * Thay pattern lặp (busy chung + alert thô) rải rác ở các *Client. Dùng:
- *   const { run, confirmRun, pending, toast } = useActionRunner();
- *   run(() => billPayment(id, mk), { key: `bill-${id}`, ok: "Đã bill" })
+ * Hook dùng chung cho thao tác server-action: toast thành công, LỖI + XÁC NHẬN qua
+ * MODAL trong app (không dùng window.confirm/alert xấu của trình duyệt), loading
+ * PER-ACTION theo key, tự router.refresh() khi ok. Nhớ render <ConfirmHost host={...}/>
+ * một lần trong component (giống SuccessToast). Dùng:
+ *   const runner = useActionRunner();
+ *   runner.run(() => billPayment(id, mk), { key: `bill-${id}`, ok: "Đã bill" })
+ *   runner.confirmRun("Huỷ đợt này?", () => cancelPayment(id), { key, danger: true })
+ *   ... <SuccessToast toast={runner.toast} /> <ConfirmHost host={runner} />
  */
 export function useActionRunner() {
   const router = useRouter();
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const confirmResolve = useRef<((ok: boolean) => void) | null>(null);
 
   const setPending = useCallback((key: string, on: boolean) => {
     setPendingKeys((prev) => {
@@ -37,7 +52,7 @@ export function useActionRunner() {
       }
       setPending(key, false);
       if (!res.ok) {
-        alert(res.error ?? "Thao tác thất bại");
+        setError(res.error ?? "Thao tác thất bại");
         return res;
       }
       if (opts?.ok) {
@@ -50,20 +65,40 @@ export function useActionRunner() {
     [router, setPending]
   );
 
-  /** Như run nhưng hỏi confirm trước (thao tác phá huỷ/không hoàn tác dễ). */
+  /** Mở modal xác nhận, trả Promise<boolean> theo lựa chọn của người dùng. */
+  const confirm = useCallback((message: string, opts?: { title?: string; danger?: boolean; confirmLabel?: string }) => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolve.current = resolve;
+      setConfirmState({ message, ...opts });
+    });
+  }, []);
+
+  const resolveConfirm = useCallback((ok: boolean) => {
+    setConfirmState(null);
+    confirmResolve.current?.(ok);
+    confirmResolve.current = null;
+  }, []);
+
+  /** Như run nhưng hỏi xác nhận (modal) trước. */
   const confirmRun = useCallback(
-    async (message: string, fn: () => Promise<ActionResult>, opts?: { key?: string; ok?: string }) => {
-      if (!confirm(message)) return { ok: false };
+    async (message: string, fn: () => Promise<ActionResult>, opts?: { key?: string; ok?: string; title?: string; danger?: boolean; confirmLabel?: string }) => {
+      const agreed = await confirm(message, { title: opts?.title, danger: opts?.danger, confirmLabel: opts?.confirmLabel });
+      if (!agreed) return { ok: false };
       return run(fn, opts);
     },
-    [run]
+    [confirm, run]
   );
+
+  /** Báo lỗi/thông báo qua modal (thay alert). */
+  const notify = useCallback((message: string) => setError(message), []);
 
   const pending = useCallback((key: string) => pendingKeys.has(key), [pendingKeys]);
   const anyPending = pendingKeys.size > 0;
 
-  return { run, confirmRun, pending, anyPending, toast };
+  return { run, confirmRun, confirm, notify, pending, anyPending, toast, _error: error, _confirmState: confirmState, _resolveConfirm: resolveConfirm, _clearError: () => setError(null) };
 }
+
+export type ActionRunner = ReturnType<typeof useActionRunner>;
 
 /** Toast thành công dùng chung (đặt đầu nội dung). */
 export function SuccessToast({ toast }: { toast: string | null }) {
@@ -73,5 +108,57 @@ export function SuccessToast({ toast }: { toast: string | null }) {
       <i className="ph-duotone ph-check-circle" aria-hidden />
       {toast}
     </div>
+  );
+}
+
+/** Modal xác nhận + báo lỗi (thay window.confirm/alert). Render 1 lần/component. */
+export function ConfirmHost({ host }: { host: ActionRunner }) {
+  const cs = host._confirmState;
+  const err = host._error;
+  return (
+    <>
+      {cs && (
+        <Modal
+          open
+          onClose={() => host._resolveConfirm(false)}
+          title={cs.title ?? "Xác nhận"}
+          icon={cs.danger ? "ph-duotone ph-warning" : "ph-duotone ph-question"}
+          iconBg={cs.danger ? "#F7E3DC" : "#EAF4EE"}
+          iconFg={cs.danger ? "#B4573B" : "#17554A"}
+          width={420}
+        >
+          <div className="text-[13.5px] text-ink-soft leading-[1.5]">{cs.message}</div>
+          <ModalActions>
+            <Button variant="ghost" className="flex-1" onClick={() => host._resolveConfirm(false)}>Huỷ</Button>
+            {cs.danger ? (
+              <button
+                onClick={() => host._resolveConfirm(true)}
+                className="flex-1 bg-[#B4573B] text-white border-0 rounded-full px-[16px] py-[10px] text-[13px] font-bold cursor-pointer hover:bg-[#9A4530]"
+              >
+                {cs.confirmLabel ?? "Xác nhận"}
+              </button>
+            ) : (
+              <Button variant="primary" className="flex-1" onClick={() => host._resolveConfirm(true)}>{cs.confirmLabel ?? "Đồng ý"}</Button>
+            )}
+          </ModalActions>
+        </Modal>
+      )}
+      {err && (
+        <Modal
+          open
+          onClose={host._clearError}
+          title="Có lỗi"
+          icon="ph-duotone ph-warning-octagon"
+          iconBg="#F7E3DC"
+          iconFg="#B4573B"
+          width={420}
+        >
+          <div className="text-[13.5px] text-ink-soft leading-[1.5]">{err}</div>
+          <ModalActions>
+            <Button variant="primary" className="flex-1" onClick={host._clearError}>Đã hiểu</Button>
+          </ModalActions>
+        </Modal>
+      )}
+    </>
   );
 }

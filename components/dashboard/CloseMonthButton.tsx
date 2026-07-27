@@ -1,7 +1,6 @@
 "use client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { useActionRunner, ConfirmHost } from "@/components/ui/useActionRunner";
 import { closeMonth, reopenMonth } from "@/lib/actions/ledger";
 
 /**
@@ -9,27 +8,25 @@ import { closeMonth, reopenMonth } from "@/lib/actions/ledger";
  * (rollback nếu lỡ bấm nhầm). Trạng thái `closed` đến từ server (getMonthCloseStatus).
  */
 export function CloseMonthButton({ monthKey, closed }: { monthKey: string; closed: boolean }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const runner = useActionRunner();
+  const { run, confirmRun, pending } = runner;
+  const busy = pending("close-month");
 
-  async function onClose() {
-    setBusy(true);
-    const res = await closeMonth(monthKey);
-    setBusy(false);
-    if (!res.ok) return alert(res.error);
-    router.refresh();
+  function onClose() {
+    run(() => closeMonth(monthKey), { key: "close-month" });
   }
-  async function onReopen() {
-    if (!confirm(`Mở lại tháng ${monthKey}? Tháng sẽ cho phép ghi/sửa lại (rollback chốt sổ).`)) return;
-    setBusy(true);
-    const res = await reopenMonth(monthKey);
-    setBusy(false);
-    if (!res.ok) return alert(res.error);
-    router.refresh();
+  function onReopen() {
+    confirmRun(
+      `Mở lại tháng ${monthKey}? Tháng sẽ cho phép ghi/sửa lại (rollback chốt sổ).`,
+      () => reopenMonth(monthKey),
+      { key: "close-month", danger: true, title: "Mở lại tháng", confirmLabel: "Mở lại" }
+    );
   }
 
   return (
-    <HeaderPortal>
+    <>
+      <ConfirmHost host={runner} />
+      <HeaderPortal>
       <div className="flex items-center gap-2 border border-white/20 rounded-full px-[18px] py-[10px] text-[#EAF4EE] text-[13px] font-semibold">
         <i className="ph-duotone ph-calendar-blank" aria-hidden />
         {monthKey}
@@ -60,6 +57,7 @@ export function CloseMonthButton({ monthKey, closed }: { monthKey: string; close
           {busy ? "Đang chốt…" : "Chốt tháng"}
         </button>
       )}
-    </HeaderPortal>
+      </HeaderPortal>
+    </>
   );
 }

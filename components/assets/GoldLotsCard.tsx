@@ -5,6 +5,7 @@ import { fmt, full, chi } from "@/lib/format";
 import { Modal, ModalActions } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, FieldRow, TextInput, Select } from "@/components/ui/Field";
+import { useActionRunner, ConfirmHost } from "@/components/ui/useActionRunner";
 import { sellGoldLot, updateGoldLot, deleteGoldLot } from "@/lib/actions/assets";
 import type { GoldLot } from "@/lib/queries/assets";
 import type { Ref } from "@/lib/queries";
@@ -22,6 +23,8 @@ export function GoldLotsCard({
   monthKey: string;
 }) {
   const router = useRouter();
+  const runner = useActionRunner();
+  const { confirmRun } = runner;
   const [sell, setSell] = useState<GoldLot | null>(null);
   const [price, setPrice] = useState("");
   const [account, setAccount] = useState("");
@@ -55,11 +58,12 @@ export function GoldLotsCard({
     setEdit(null);
     router.refresh();
   }
-  async function removeLot(l: GoldLot) {
-    if (!confirm(`Xoá lô vàng ${chi(l.quantity)}?`)) return;
-    const res = await deleteGoldLot(l.id);
-    if (!res.ok) return alert(res.error);
-    router.refresh();
+  function removeLot(l: GoldLot) {
+    confirmRun(`Xoá lô vàng ${chi(l.quantity)}?`, () => deleteGoldLot(l.id), {
+      danger: true,
+      title: "Xoá lô vàng",
+      confirmLabel: "Xoá",
+    });
   }
 
   function openSell(l: GoldLot) {
@@ -92,7 +96,9 @@ export function GoldLotsCard({
   }
 
   return (
-    <div className="bg-card border border-card-border rounded-[18px] overflow-hidden">
+    <>
+      <ConfirmHost host={runner} />
+      <div className="bg-card border border-card-border rounded-[18px] overflow-hidden">
       <div className="px-[18px] pt-4 pb-2 text-[15px] font-bold">Gold lots · {lots.length}</div>
       <div className="overflow-x-auto">
         <div style={{ minWidth: 660 }}>
@@ -250,6 +256,7 @@ export function GoldLotsCard({
           </>
         )}
       </Modal>
-    </div>
+      </div>
+    </>
   );
 }

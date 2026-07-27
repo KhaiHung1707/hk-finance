@@ -10,6 +10,7 @@ import { Field, FieldRow, TextInput } from "@/components/ui/Field";
 import { EntryModal } from "./EntryModal";
 import { ReceiveModal } from "./ReceiveModal";
 import { HeaderPortal } from "@/components/ui/HeaderPortal";
+import { useActionRunner, ConfirmHost } from "@/components/ui/useActionRunner";
 import { updateTransaction, deleteTransaction } from "@/lib/actions/ledger";
 import type { LedgerRow, MonthlySummary, Ref } from "@/lib/queries";
 
@@ -50,6 +51,8 @@ export function LedgerClient({
   hideOwnAddButton?: boolean;
 }) {
   const router = useRouter();
+  const runner = useActionRunner();
+  const { confirmRun } = runner;
   const [entryKind, setEntryKind] = useState<"income" | "expense" | null>(null);
   const [receiveTx, setReceiveTx] = useState<{ id: string; amount: number; label: string } | null>(null);
 
@@ -84,14 +87,15 @@ export function LedgerClient({
     setEdit(null);
     router.refresh();
   }
-  async function removeTx(r: LedgerRow) {
+  function removeTx(r: LedgerRow) {
     const warn = r.ref_table
       ? `Xoá giao dịch này? Nó sinh từ module (${r.ref_table}) — module gốc sẽ được hoàn về trạng thái trước.`
       : "Xoá giao dịch này? Số dư sẽ được hoàn nguyên.";
-    if (!confirm(warn)) return;
-    const res = await deleteTransaction(r.id);
-    if (!res.ok) return alert(res.error);
-    router.refresh();
+    confirmRun(warn, () => deleteTransaction(r.id), {
+      danger: true,
+      title: "Xoá giao dịch",
+      confirmLabel: "Xoá",
+    });
   }
 
   const [typeF, setTypeF] = useState("all");
@@ -117,6 +121,7 @@ export function LedgerClient({
 
   return (
     <>
+      <ConfirmHost host={runner} />
       {/* Nút Income/Expense qua portal — ẩn khi dùng nút "Thêm" chung của trang gộp */}
       {!hideOwnAddButton && (
         <HeaderPortal>
