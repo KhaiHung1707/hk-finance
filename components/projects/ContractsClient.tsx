@@ -10,6 +10,7 @@ import { HeaderPortal } from "@/components/ui/HeaderPortal";
 import { useActionRunner, SuccessToast } from "@/components/ui/useActionRunner";
 import { ContractOverview, useContractFilter } from "@/components/projects/ContractOverview";
 import { PaymentRows, MODELS, modelLabel, modelIcon, contractStatusStyle } from "@/components/projects/contract-shared";
+import { ContractTableView, ContractTimelineView, type ProjectView } from "@/components/projects/contract-views";
 import {
   createContract,
   updateContract,
@@ -18,6 +19,12 @@ import {
 } from "@/lib/actions/projects";
 import type { ContractFinance, PaymentModel } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
+
+/** Định dạng số theo tiền tệ cho preview form (VND/CAD/USD). */
+function previewCcy(v: number, cur: string): string {
+  const s = new Intl.NumberFormat("en-US").format(Math.round(v));
+  return cur === "CAD" ? "C$" + s : cur === "USD" ? "$" + s : s + " ₫";
+}
 
 type EditState = {
   id: string | null;
@@ -45,6 +52,7 @@ export function ContractsClient({
   fx,
   fxUsd,
   feePctDefault,
+  todayIso,
 }: {
   monthKey: string;
   contracts: ContractFinance[];
@@ -53,9 +61,11 @@ export function ContractsClient({
   fx: Record<string, number>;
   fxUsd: number;
   feePctDefault: number;
+  todayIso: string;
 }) {
   const { run, pending, toast } = useActionRunner();
   const { filter, setFilter, filtered } = useContractFilter(contracts);
+  const [view, setView] = useState<ProjectView>("list");
   const [edit, setEdit] = useState<EditState | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -101,7 +111,7 @@ export function ContractsClient({
       client: edit.client,
       name: edit.name,
       source: upwork ? "Upwork" : edit.source,
-      currency: upwork ? ("USD" as const) : edit.currency,
+      currency: edit.currency, // luôn theo lựa chọn — tránh sai mệnh giá (USD/CAD/VND)
       feePct: upwork ? feePct : null,
       hourlyRate: edit.paymentModel === "hourly_weekly" && edit.hourlyRate ? Number(edit.hourlyRate) : null,
       retainerAmount: edit.paymentModel === "monthly_retainer" && edit.retainerAmount ? Number(edit.retainerAmount) : null,
@@ -126,6 +136,7 @@ export function ContractsClient({
   const previewRate = edit && edit.hourlyRate ? Number(edit.hourlyRate) : 0;
   const previewFee = edit && edit.feePct !== "" ? Number(edit.feePct) / 100 : feePctDefault;
   const upworkEdit = edit ? isUpworkModel(edit.paymentModel) : false;
+  const previewFx = edit ? (edit.currency === "USD" ? fxUsd : fx[edit.currency] ?? 1) : 1;
 
   return (
     <>
@@ -142,6 +153,22 @@ export function ContractsClient({
       <SuccessToast toast={toast} />
       <ContractOverview contracts={contracts} filter={filter} setFilter={setFilter} shownCount={filtered.length} />
 
+      {/* View switcher — nhiều góc nhìn khi dữ liệu dày */}
+      {contracts.length > 0 && (
+        <div className="flex gap-1 bg-card border border-card-border rounded-full p-1 w-fit">
+          {([
+            { v: "list", label: "Danh sách", icon: "ph-duotone ph-cards" },
+            { v: "table", label: "Bảng", icon: "ph-duotone ph-table" },
+            { v: "timeline", label: "Sắp tới hạn", icon: "ph-duotone ph-calendar-check" },
+          ] as const).map((t) => (
+            <button key={t.v} onClick={() => setView(t.v)}
+              className={`flex items-center gap-[6px] rounded-full px-[14px] py-[7px] text-[12px] font-bold cursor-pointer border-0 ${view === t.v ? "bg-primary text-white" : "bg-transparent text-ink-soft hover:text-primary"}`}>
+              <i className={t.icon} aria-hidden /> {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {contracts.length === 0 && (
         <div className="bg-card border border-card-border rounded-[18px] p-8 text-center text-[13px] text-muted">
           Chưa có hợp đồng. Bấm “Hợp đồng mới”.
@@ -153,7 +180,10 @@ export function ContractsClient({
         </div>
       )}
 
-      {filtered.map((c) => {
+      {view === "table" && filtered.length > 0 && <ContractTableView contracts={filtered} />}
+      {view === "timeline" && filtered.length > 0 && <ContractTimelineView contracts={filtered} todayIso={todayIso} />}
+
+      {view === "list" && filtered.map((c) => {
         const fee = c.fee_pct ?? feePctDefault;
         const upwork = isUpworkModel(c.payment_model);
         const sm = contractStatusStyle[c.status] ?? contractStatusStyle.active;
@@ -279,15 +309,28 @@ export function ContractsClient({
                   <TextInput value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Dashboard UI" />
                 </Field>
               </FieldRow>
-              <Field label="Loại chi trả">
-                <Select value={edit.paymentModel} onChange={(e) => setEdit({ ...edit, paymentModel: e.target.value as PaymentModel })}>
-                  {MODELS.map((m) => (
-                    <option key={m.v} value={m.v}>{m.label} — {m.hint}</option>
-                  ))}
-                </Select>
-              </Field>
+              <FieldRow>
+                <Field label="Loại chi trả">
+                  <Select value={edit.paymentModel} onChange={(e) => {
+                    const m = e.target.value as PaymentModel;
+                    // đổi model → gợi ý tiền tệ mặc định (project→VND, Upwork→USD) nhưng vẫn cho đổi.
+                    const defCcy = m === "fixed_milestones" ? "VND" : "USD";
+                    setEdit({ ...edit, paymentModel: m, currency: edit.id ? edit.currency : (defCcy as "VND" | "CAD" | "USD") });
+                  }}>
+                    {MODELS.map((m) => (
+                      <option key={m.v} value={m.v}>{m.label} — {m.hint}</option>
+                    ))}
+                  </Select>
+                </Field>
+                {/* Tiền tệ LUÔN chọn được — tránh sai mệnh giá (USD/CAD/VND) cho mọi loại. */}
+                <Field label="Tiền tệ">
+                  <Select value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value as "VND" | "CAD" | "USD" })}>
+                    {(["VND", "CAD", "USD"] as const).map((cc) => (<option key={cc}>{cc}</option>))}
+                  </Select>
+                </Field>
+              </FieldRow>
 
-              {/* fixed_milestones (project): source + currency + contract_value */}
+              {/* fixed_milestones (project): source + contract_value */}
               {!upworkEdit && (
                 <FieldRow>
                   <Field label="Nguồn thu">
@@ -295,12 +338,7 @@ export function ContractsClient({
                       {sources.map((s) => (<option key={s.id} value={s.name}>{s.name}</option>))}
                     </Select>
                   </Field>
-                  <Field label="Tiền tệ">
-                    <Select value={edit.currency} onChange={(e) => setEdit({ ...edit, currency: e.target.value as "VND" | "CAD" | "USD" })}>
-                      {(["VND", "CAD", "USD"] as const).map((cc) => (<option key={cc}>{cc}</option>))}
-                    </Select>
-                  </Field>
-                  <Field label="Giá trị hợp đồng">
+                  <Field label={`Giá trị hợp đồng (${edit.currency})`}>
                     <MoneyInput value={edit.contractValue} onValueChange={(v) => setEdit({ ...edit, contractValue: v })} placeholder="0" />
                   </Field>
                 </FieldRow>
@@ -310,12 +348,12 @@ export function ContractsClient({
               {upworkEdit && (
                 <FieldRow>
                   {edit.paymentModel === "hourly_weekly" && (
-                    <Field label="Rate ($/giờ)">
+                    <Field label={`Rate (${edit.currency}/giờ)`}>
                       <TextInput type="number" value={edit.hourlyRate} onChange={(e) => setEdit({ ...edit, hourlyRate: e.target.value })} placeholder="35" />
                     </Field>
                   )}
                   {edit.paymentModel === "monthly_retainer" && (
-                    <Field label="Khoản/tháng ($)">
+                    <Field label={`Khoản/tháng (${edit.currency})`}>
                       <TextInput type="number" value={edit.retainerAmount} onChange={(e) => setEdit({ ...edit, retainerAmount: e.target.value })} placeholder="1500" />
                     </Field>
                   )}
@@ -327,11 +365,11 @@ export function ContractsClient({
 
               <div className="text-[11px] text-muted">
                 {edit.paymentModel === "hourly_weekly" && previewRate > 0 ? (
-                  <>1 giờ = ${previewRate} → net sau phí {pct(previewFee, 0)}: <b className="text-[#1F7A5C]">${Math.round(previewRate * (1 - previewFee))}</b>/giờ · fx {new Intl.NumberFormat("en-US").format(fxUsd)}</>
+                  <>1 giờ = {previewCcy(previewRate, edit.currency)} → net sau phí {pct(previewFee, 0)}: <b className="text-[#1F7A5C]">{previewCcy(Math.round(previewRate * (1 - previewFee)), edit.currency)}</b>/giờ{edit.currency !== "VND" && ` · fx ${new Intl.NumberFormat("en-US").format(previewFx)}`}</>
                 ) : upworkEdit ? (
-                  <>Phí sàn {pct(previewFee, 0)} trừ khi bill mỗi đợt · USD→VND theo fx {new Intl.NumberFormat("en-US").format(fxUsd)} lúc bill.</>
+                  <>Phí sàn {pct(previewFee, 0)} trừ khi bill mỗi đợt{edit.currency !== "VND" && ` · ${edit.currency}→VND theo fx ${new Intl.NumberFormat("en-US").format(previewFx)}`} lúc bill.</>
                 ) : (
-                  <>Dự án đa tiền tệ — mỗi milestone khoá fx khi bill. Không trừ phí sàn.</>
+                  <>Mỗi milestone khoá fx {edit.currency}→VND khi bill. Không trừ phí sàn.</>
                 )}
               </div>
               {err && <div className="text-[12px] text-[#B4573B] font-semibold">{err}</div>}

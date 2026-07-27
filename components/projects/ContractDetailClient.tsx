@@ -142,10 +142,17 @@ export function ContractDetailClient({
             </div>
             <div className="text-[13px] text-muted mt-1">
               {c.client} · {modelLabel(c.payment_model)} · {c.source ?? "—"} · {c.currency}
-              {c.payment_model === "hourly_weekly" && c.hourly_rate != null && ` · $${c.hourly_rate}/giờ`}
-              {c.payment_model === "monthly_retainer" && c.retainer_amount != null && ` · $${c.retainer_amount}/tháng`}
+              {c.payment_model === "hourly_weekly" && c.hourly_rate != null && ` · ${c.hourly_rate} ${c.currency}/giờ`}
+              {c.payment_model === "monthly_retainer" && c.retainer_amount != null && ` · ${c.retainer_amount} ${c.currency}/tháng`}
               {upwork && ` · fee ${pct(fee, 0)}`}
             </div>
+            {/* Hạn gần nhất — thông tin hành động, đưa lên header thành chip */}
+            {c.next_due && (
+              <span className="inline-flex items-center gap-[5px] mt-2 text-[11px] font-bold text-[#A5731F] bg-[#FBF0DC] rounded-full px-[10px] py-[3px]">
+                <i className="ph-duotone ph-alarm" aria-hidden />
+                Hạn gần nhất: {c.next_due}
+              </span>
+            )}
           </div>
         </div>
 
@@ -167,7 +174,7 @@ export function ContractDetailClient({
       <div className="grid gap-[12px]" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
         <Kpi icon="ph-duotone ph-hand-coins" bg="#DFF2E7" fg="#1F7A5C" label="Đã thu" value={fmt(c.collected_vnd)} title={full(c.collected_vnd)} />
         <Kpi icon="ph-duotone ph-hourglass-medium" bg="#FBF0DC" fg="#A5731F" label="Chờ thu" value={fmt(c.outstanding_vnd)} title={full(c.outstanding_vnd)} />
-        <Kpi icon="ph-duotone ph-list-checks" bg="#EAF4EE" fg="#17554A" label="Đợt (thu/tổng)" value={`${c.payment_paid}/${c.payment_count}`} />
+        <Kpi icon="ph-duotone ph-scales" bg="#EAF4EE" fg="#17554A" label="Giá trị HĐ" value={c.contract_value_vnd > 0 ? fmt(c.contract_value_vnd) : "—"} title={c.contract_value_vnd > 0 ? full(c.contract_value_vnd) : undefined} />
         <Kpi icon="ph-duotone ph-clock" bg="#F2EFE6" fg="#6B7570" label="Đợt chưa bill" value={String(c.draft_count)} />
       </div>
 
@@ -178,7 +185,7 @@ export function ContractDetailClient({
             <i className="ph-duotone ph-list-bullets" aria-hidden />
           </div>
           <div className="text-[15px] font-bold">Các đợt chi trả</div>
-          {c.next_due && <span className="text-[11px] text-muted ml-auto">Hạn gần nhất: {c.next_due}</span>}
+          <span className="text-[11px] text-muted ml-auto">{c.payment_paid}/{c.payment_count} đợt đã thu</span>
         </div>
         <PaymentRows
           contract={c} monthKey={monthKey} accounts={accounts} fx={fx} fxUsd={fxUsd}
@@ -186,7 +193,7 @@ export function ContractDetailClient({
         />
 
         {/* Generate retainer */}
-        {c.payment_model === "monthly_retainer" && c.status !== "done" && (
+        {c.payment_model === "monthly_retainer" && c.status !== "done" && c.status !== "cancelled" && (
           <div className="mt-3 flex items-center gap-2 flex-wrap bg-fill-soft rounded-[12px] p-2">
             <span className="text-[11px] text-muted font-semibold px-1">Sinh đợt tháng</span>
             <TextInput value={genFrom} onChange={(e) => setGenFrom(e.target.value)} placeholder="T7/26" className="max-w-[90px]" />

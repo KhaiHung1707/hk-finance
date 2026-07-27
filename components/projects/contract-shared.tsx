@@ -89,6 +89,8 @@ export function PaymentRows({
 }) {
   const upwork = c.payment_model !== "fixed_milestones";
   const fee = c.fee_pct ?? (upwork ? feePctDefault : 0);
+  // Hợp đồng đã kết thúc/huỷ → chặn thao tác tạo mới (bill/due); vẫn cho thu nốt (collect/rollback).
+  const contractOpen = c.status !== "done" && c.status !== "cancelled";
 
   const [addOpen, setAddOpen] = useState(false);
   const [pName, setPName] = useState("");
@@ -99,9 +101,15 @@ export function PaymentRows({
 
   const [collect, setCollect] = useState<{ id: string; label: string; amountVnd: number } | null>(null);
   const [collectAccount, setCollectAccount] = useState("");
+  const [detailId, setDetailId] = useState<string | null>(null); // đợt đang xem chi tiết
 
   const confirm2: ConfirmRunner =
     confirmRun ?? ((msg, fn, opts) => (window.confirm(msg) ? run(fn, opts) : Promise.resolve({ ok: false })));
+
+  function openCollect(p: Payment, vnd: number) {
+    setCollect({ id: p.id, label: `${c.client} · ${p.name}`, amountVnd: vnd });
+    setCollectAccount("");
+  }
 
   async function addPayment() {
     setBusy(true);
@@ -155,33 +163,41 @@ export function PaymentRows({
           const locked = p.amount_vnd != null;
           const k = `pay-${p.id}`;
           return (
-            <div key={p.id} className="flex items-center gap-3 border border-[#EFEAE0] rounded-[12px] px-[14px] py-[10px] hover:border-[#C9C0AC] hover:bg-[#FAF8F2] flex-wrap">
-              <div className="flex-1 min-w-[140px]">
-                <div className="text-[13px] font-semibold">
-                  {p.name || "Đợt"}
+            <div key={p.id} className="flex items-center gap-3 border border-[#EFEAE0] rounded-[12px] px-[14px] py-[10px] hover:border-[#C9C0AC] hover:bg-[#FAF8F2]">
+              <button
+                type="button"
+                onClick={() => setDetailId(p.id)}
+                className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
+                title="Xem chi tiết đợt"
+              >
+                <div className="text-[13px] font-semibold hover:text-primary flex items-center gap-[6px]">
+                  <span className="truncate">{p.name || "Đợt"}</span>
                   {c.payment_model === "hourly_weekly" && p.hours != null && (
-                    <span className="text-[11px] text-muted font-normal"> · {p.hours}h × {usd(c.hourly_rate ?? 0)}</span>
+                    <span className="text-[11px] text-muted font-normal whitespace-nowrap">· {p.hours}h × {usd(c.hourly_rate ?? 0)}</span>
                   )}
+                  <i className="ph-duotone ph-caret-right text-faint text-[11px] flex-shrink-0" aria-hidden />
                 </div>
-                <div className="text-[11px] text-muted tnum" title={full(rv.vnd)}>
+                <div className="text-[11px] text-muted tnum truncate" title={full(rv.vnd)}>
                   {rv.secondary ? `${rv.secondary} · ` : ""}{rv.primary} · <b>{fmt(rv.vnd)}</b>
-                  <span className="text-faint"> · {locked ? `@ ${new Intl.NumberFormat("en-US").format(p.fx_rate ?? 0)}` : "ước tính"}</span>
+                  <span className="text-faint"> · {locked ? `@ ${new Intl.NumberFormat("en-US").format(p.fx_rate ?? 0)} ${c.currency}` : "ước tính"}</span>
                   {(p.received_on || p.billed_on) && <span className="text-faint"> · {p.received_on ?? p.billed_on}</span>}
                   {!p.received_on && !p.billed_on && p.due_on && <span className="text-[#A5731F]"> · dự kiến {p.due_on}</span>}
                 </div>
-              </div>
+              </button>
+              {/* Cụm action: luôn dính nhau, chỉ cả cụm xuống dòng nguyên khối khi hẹp */}
+              <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
               <Badge bg={sm.bg} fg={sm.fg}>{sm.label}</Badge>
-              {(p.status === "draft" || p.status === "billed") && (
+              {(p.status === "draft" || p.status === "billed") && contractOpen && (
                 <DueDateButton value={p.due_on} onSave={(d) => run(() => setPaymentDueOn(p.id, d))} size={30} />
               )}
-              {p.status === "draft" && (
+              {p.status === "draft" && contractOpen && (
                 <button onClick={() => run(() => billPayment(p.id, monthKey), { key: k, ok: "Đã bill đợt" })} disabled={pending(k)}
                   className="bg-primary-dark text-white border-0 rounded-full px-[12px] py-[6px] text-[11px] font-bold cursor-pointer hover:bg-[#0A211C] disabled:opacity-50">
                   {pending(k) ? "…" : "Bill"}
                 </button>
               )}
               {p.status === "billed" && (
-                <button onClick={() => { setCollect({ id: p.id, label: `${c.client} · ${p.name}`, amountVnd: rv.vnd }); setCollectAccount(""); }} disabled={pending(k)}
+                <button onClick={() => openCollect(p, rv.vnd)} disabled={pending(k)}
                   className="bg-primary text-white border-0 rounded-full px-[12px] py-[6px] text-[11px] font-bold cursor-pointer hover:bg-primary-hover disabled:opacity-50">
                   Collect
                 </button>
@@ -203,6 +219,7 @@ export function PaymentRows({
                   <i className="ph-duotone ph-x-circle" aria-hidden />
                 </button>
               )}
+              </div>
             </div>
           );
         })}
@@ -254,6 +271,143 @@ export function PaymentRows({
           </>
         )}
       </Modal>
+
+      {/* Pop-up chi tiết từng đợt/milestone */}
+      <PaymentDetailModal
+        payment={c.payments.find((p) => p.id === detailId) ?? null}
+        contract={c}
+        monthKey={monthKey}
+        fx={fx}
+        fxUsd={fxUsd}
+        fee={fee}
+        upwork={upwork}
+        run={run}
+        confirm2={confirm2}
+        pending={pending}
+        onClose={() => setDetailId(null)}
+        onCollect={(p, vnd) => { setDetailId(null); openCollect(p, vnd); }}
+      />
     </div>
   );
+}
+
+/** Pop-up chi tiết 1 đợt: mọi trường + timeline + thao tác. */
+function PaymentDetailModal({
+  payment: p, contract: c, monthKey, fx, fxUsd, fee, upwork, run, confirm2, pending, onClose, onCollect,
+}: {
+  payment: Payment | null;
+  contract: ContractFinance;
+  monthKey: string;
+  fx: Record<string, number>;
+  fxUsd: number;
+  fee: number;
+  upwork: boolean;
+  run: Runner;
+  confirm2: ConfirmRunner;
+  pending: (key: string) => boolean;
+  onClose: () => void;
+  onCollect: (p: Payment, vnd: number) => void;
+}) {
+  if (!p) return null;
+  const sm = payStatusStyle[p.status];
+  const k = `pay-${p.id}`;
+  const grossUsd = upwork ? (c.payment_model === "hourly_weekly" ? (p.hours ?? 0) * (c.hourly_rate ?? 0) : p.amount ?? 0) : 0;
+  const netUsd = grossUsd * (1 - fee);
+  const vnd = p.amount_vnd ?? (upwork ? Math.round(netUsd * fxUsd) : Math.round((p.amount ?? 0) * (fx[c.currency] ?? 1)));
+  const locked = p.amount_vnd != null;
+
+  const rows: [string, React.ReactNode][] = [];
+  rows.push(["Loại đợt", kindLabel(p.kind)]);
+  if (c.payment_model === "hourly_weekly") {
+    rows.push(["Số giờ", `${p.hours ?? 0}h × ${usd(c.hourly_rate ?? 0)}/giờ`]);
+    rows.push(["Gross", usd(grossUsd)]);
+    rows.push([`Net (sau phí ${Math.round(fee * 100)}%)`, usd(netUsd)]);
+  } else if (upwork) {
+    rows.push(["Gross", usd(grossUsd)]);
+    rows.push([`Net (sau phí ${Math.round(fee * 100)}%)`, usd(netUsd)]);
+  } else {
+    rows.push(["Giá trị", ccy(p.amount ?? 0, c.currency)]);
+  }
+  rows.push([locked ? "VND (đã khoá)" : "VND (ước tính)", <b key="vnd">{full(vnd)}</b>]);
+  if (p.fx_rate != null) rows.push(["Tỷ giá khoá", `${new Intl.NumberFormat("en-US").format(p.fx_rate)} (${c.currency}→VND)`]);
+  if (p.period_start || p.period_end) rows.push(["Kỳ (tuần)", `${p.period_start ?? "?"} → ${p.period_end ?? "?"}`]);
+  if (p.period_month) rows.push(["Tháng (retainer)", p.period_month]);
+
+  return (
+    <Modal open onClose={onClose} title={p.name || "Chi tiết đợt"} icon="ph-duotone ph-receipt" width={460}>
+      <div className="flex items-center gap-2 mb-3">
+        <Badge bg={sm.bg} fg={sm.fg}>{sm.label}</Badge>
+        <span className="text-[12px] text-muted">{c.client}{c.name ? ` · ${c.name}` : ""}</span>
+      </div>
+
+      {/* Bảng thông tin */}
+      <div className="flex flex-col gap-0 rounded-[12px] border border-card-border overflow-hidden mb-3">
+        {rows.map(([label, val], i) => (
+          <div key={label} className="flex items-center justify-between px-4 py-[9px] text-[13px]" style={{ background: i % 2 ? "#FAF8F2" : "#fff" }}>
+            <span className="text-muted">{label}</span>
+            <span className="font-semibold tnum text-right">{val}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Timeline ngày */}
+      <div className="mb-3">
+        <div className="text-[11px] font-bold text-muted uppercase tracking-[0.4px] mb-2">Timeline</div>
+        <div className="flex flex-col gap-2">
+          <TimelineStep done={!!p.due_on} label="Dự kiến bill" date={p.due_on} icon="ph-duotone ph-calendar-dots" />
+          <TimelineStep done={!!p.billed_on} label="Đã bill (chờ thu)" date={p.billed_on} icon="ph-duotone ph-hourglass-medium" />
+          <TimelineStep done={!!p.received_on} label="Đã thu" date={p.received_on} icon="ph-duotone ph-check-circle" />
+        </div>
+      </div>
+
+      {/* Thao tác theo trạng thái */}
+      <ModalActions>
+        {p.status === "draft" && (
+          <Button variant="primary" className="flex-1" disabled={pending(k)}
+            onClick={() => run(() => billPayment(p.id, monthKey), { key: k, ok: "Đã bill đợt" }).then((r) => { if (r.ok) onClose(); })}>
+            Bill đợt này
+          </Button>
+        )}
+        {p.status === "billed" && (
+          <Button variant="primary" className="flex-1" onClick={() => onCollect(p, vnd)}>Collect (thu tiền)</Button>
+        )}
+        {(p.status === "billed" || p.status === "received") && (
+          <Button variant="ghost" className="flex-1"
+            onClick={() => {
+              const back = p.status === "received" ? "billed" : "draft";
+              confirm2(`Lùi "${p.name}" từ ${p.status} → ${back}?`, () => rollbackStatus("payments", p.id), { key: k }).then((r) => { if (r.ok) onClose(); });
+            }}>
+            Lùi 1 bước
+          </Button>
+        )}
+        {(p.status === "draft" || p.status === "billed") && (
+          <button
+            onClick={() => confirm2(`Huỷ đợt "${p.name}"?`, () => cancelPayment(p.id), { key: k }).then((r) => { if (r.ok) onClose(); })}
+            className="bg-[#F7E3DC] text-[#B4573B] border-0 rounded-full px-[16px] py-[10px] text-[13px] font-bold cursor-pointer hover:bg-[#F0D2C6]">
+            Huỷ
+          </button>
+        )}
+        <Button variant="ghost" onClick={onClose}>Đóng</Button>
+      </ModalActions>
+    </Modal>
+  );
+}
+
+function TimelineStep({ done, label, date, icon }: { done: boolean; label: string; date: string | null; icon: string }) {
+  return (
+    <div className="flex items-center gap-[10px]">
+      <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-[13px] flex-shrink-0"
+        style={{ background: done ? "#DFF2E7" : "#F2EFE6", color: done ? "#1F7A5C" : "#9AA49E" }}>
+        <i className={icon} aria-hidden />
+      </div>
+      <div className="flex-1 flex items-center justify-between">
+        <span className={`text-[13px] ${done ? "font-semibold" : "text-muted"}`}>{label}</span>
+        <span className="text-[12px] text-muted tnum">{date ?? "—"}</span>
+      </div>
+    </div>
+  );
+}
+
+function kindLabel(k: Payment["kind"]): string {
+  return k === "milestone" ? "Milestone" : k === "weekly" ? "Tuần (hourly)" : k === "monthly" ? "Tháng (retainer)" : "Một lần";
 }

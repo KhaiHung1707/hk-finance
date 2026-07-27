@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectsPage() {
   const monthKey = await getBaselineMonthKey();
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [contracts, fx, defaults, accounts, sources, profile] = await Promise.all([
     getContracts(),
     getFxRates(),
@@ -34,6 +35,7 @@ export default async function ProjectsPage() {
         fx={fx}
         fxUsd={defaults.fxUsd}
         feePctDefault={defaults.feePct}
+        todayIso={todayIso}
       />
     </AppShell>
   );
