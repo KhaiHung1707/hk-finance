@@ -15,7 +15,6 @@ import {
   createContract,
   updateContract,
   billContractDrafts,
-  generateRetainerPayments,
 } from "@/lib/actions/projects";
 import type { ContractFinance, PaymentModel } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
@@ -70,11 +69,6 @@ export function ContractsClient({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // retainer generate (theo contract)
-  const [genFor, setGenFor] = useState<string | null>(null);
-  const [genFrom, setGenFrom] = useState(monthKey);
-  const [genTo, setGenTo] = useState(monthKey);
-
   const defaultSource = sources[0]?.name ?? "Structure";
 
   function openNew() {
@@ -123,14 +117,6 @@ export function ContractsClient({
     setBusy(false);
     if (!res.ok) return setErr(res.error ?? "Lỗi");
     setEdit(null);
-  }
-
-  async function runGenerate(c: ContractFinance) {
-    setBusy(true);
-    const res = await generateRetainerPayments(c.id, genFrom, genTo);
-    setBusy(false);
-    if (!res.ok) return alert(res.error);
-    setGenFor(null);
   }
 
   const previewRate = edit && edit.hourlyRate ? Number(edit.hourlyRate) : 0;
@@ -204,7 +190,6 @@ export function ContractsClient({
                     {` · ${modelLabel(c.payment_model)}`}
                     {c.source ? ` · ${c.source}` : ""}
                     {c.payment_model === "hourly_weekly" && c.hourly_rate != null && ` · $${c.hourly_rate}/giờ`}
-                    {c.payment_model === "monthly_retainer" && c.retainer_amount != null && ` · $${c.retainer_amount}/tháng`}
                     {upwork && ` · fee ${pct(fee, 0)}`}
                   </div>
                 </div>
@@ -272,26 +257,6 @@ export function ContractsClient({
               pending={pending}
               variant="list"
             />
-
-            {/* Generate retainer */}
-            {c.payment_model === "monthly_retainer" && (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {genFor === c.id ? (
-                  <div className="flex items-center gap-2 flex-wrap bg-fill-soft rounded-[12px] p-2">
-                    <span className="text-[11px] text-muted font-semibold px-1">Sinh đợt tháng</span>
-                    <TextInput value={genFrom} onChange={(e) => setGenFrom(e.target.value)} placeholder="T7/26" className="max-w-[90px]" />
-                    <span className="text-muted text-[12px]">→</span>
-                    <TextInput value={genTo} onChange={(e) => setGenTo(e.target.value)} placeholder="T12/26" className="max-w-[90px]" />
-                    <Button variant="primary" onClick={() => runGenerate(c)} disabled={busy}>Sinh</Button>
-                    <Button variant="ghost" onClick={() => setGenFor(null)}>Đóng</Button>
-                  </div>
-                ) : (
-                  <Button variant="ghost" onClick={() => { setGenFor(c.id); setGenFrom(monthKey); setGenTo(monthKey); }}>
-                    + Sinh đợt tháng (retainer)
-                  </Button>
-                )}
-              </div>
-            )}
           </div>
         );
       })}
@@ -350,11 +315,6 @@ export function ContractsClient({
                   {edit.paymentModel === "hourly_weekly" && (
                     <Field label={`Rate (${edit.currency}/giờ)`}>
                       <TextInput type="number" value={edit.hourlyRate} onChange={(e) => setEdit({ ...edit, hourlyRate: e.target.value })} placeholder="35" />
-                    </Field>
-                  )}
-                  {edit.paymentModel === "monthly_retainer" && (
-                    <Field label={`Khoản/tháng (${edit.currency})`}>
-                      <TextInput type="number" value={edit.retainerAmount} onChange={(e) => setEdit({ ...edit, retainerAmount: e.target.value })} placeholder="1500" />
                     </Field>
                   )}
                   <Field label="Fee % (rỗng = mặc định)">

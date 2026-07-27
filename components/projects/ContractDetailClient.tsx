@@ -14,7 +14,6 @@ import {
   deleteContract,
   endContract,
   reactivateContract,
-  generateRetainerPayments,
 } from "@/lib/actions/projects";
 import type { ContractFinance, PaymentModel } from "@/lib/queries/projects";
 import type { Ref } from "@/lib/queries";
@@ -53,10 +52,6 @@ export function ContractDetailClient({
     retainerAmount: c.retainer_amount != null ? String(c.retainer_amount) : "",
     contractValue: c.contract_value != null ? String(c.contract_value) : "",
   });
-
-  // retainer generate
-  const [genFrom, setGenFrom] = useState(monthKey);
-  const [genTo, setGenTo] = useState(monthKey);
 
   const isUp = (m: PaymentModel) => m !== "fixed_milestones";
 
@@ -143,7 +138,6 @@ export function ContractDetailClient({
             <div className="text-[13px] text-muted mt-1">
               {c.client} · {modelLabel(c.payment_model)} · {c.source ?? "—"} · {c.currency}
               {c.payment_model === "hourly_weekly" && c.hourly_rate != null && ` · ${c.hourly_rate} ${c.currency}/giờ`}
-              {c.payment_model === "monthly_retainer" && c.retainer_amount != null && ` · ${c.retainer_amount} ${c.currency}/tháng`}
               {upwork && ` · fee ${pct(fee, 0)}`}
             </div>
             {/* Hạn gần nhất — thông tin hành động, đưa lên header thành chip */}
@@ -191,17 +185,6 @@ export function ContractDetailClient({
           contract={c} monthKey={monthKey} accounts={accounts} fx={fx} fxUsd={fxUsd}
           feePctDefault={feePctDefault} run={run} confirmRun={confirmRun} pending={pending} variant="detail"
         />
-
-        {/* Generate retainer */}
-        {c.payment_model === "monthly_retainer" && c.status !== "done" && c.status !== "cancelled" && (
-          <div className="mt-3 flex items-center gap-2 flex-wrap bg-fill-soft rounded-[12px] p-2">
-            <span className="text-[11px] text-muted font-semibold px-1">Sinh đợt tháng</span>
-            <TextInput value={genFrom} onChange={(e) => setGenFrom(e.target.value)} placeholder="T7/26" className="max-w-[90px]" />
-            <span className="text-muted text-[12px]">→</span>
-            <TextInput value={genTo} onChange={(e) => setGenTo(e.target.value)} placeholder="T12/26" className="max-w-[90px]" />
-            <Button variant="primary" onClick={() => run(() => generateRetainerPayments(c.id, genFrom, genTo), { ok: "Đã sinh đợt tháng" })}>Sinh</Button>
-          </div>
-        )}
       </div>
 
       {/* Edit modal */}
@@ -237,9 +220,6 @@ export function ContractDetailClient({
             <FieldRow>
               {ed.paymentModel === "hourly_weekly" && (
                 <Field label="Rate ($/giờ)"><TextInput type="number" value={ed.hourlyRate} onChange={(e) => setEd({ ...ed, hourlyRate: e.target.value })} /></Field>
-              )}
-              {ed.paymentModel === "monthly_retainer" && (
-                <Field label="Khoản/tháng ($)"><TextInput type="number" value={ed.retainerAmount} onChange={(e) => setEd({ ...ed, retainerAmount: e.target.value })} /></Field>
               )}
               <Field label="Fee % (rỗng = mặc định)"><TextInput type="number" value={ed.feePct} onChange={(e) => setEd({ ...ed, feePct: e.target.value })} placeholder={String(Math.round(feePctDefault * 100))} /></Field>
             </FieldRow>

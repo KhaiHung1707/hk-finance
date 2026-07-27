@@ -359,39 +359,37 @@ begin
   return v_n;
 end $$;
 
--- ---------- generate_retainer_payments (Structure retainer tháng) ------------
--- Sinh 1 đợt draft/tháng cho dải [from..to]. IDEMPOTENT: on conflict do nothing.
--- A2: TỰ SINH chuỗi tháng từ from→to và ensure_month TỪNG tháng — không dựa vào
--- month_keys đã tồn tại (trước đây bỏ sót tháng giữa dải nếu chưa được tạo).
-create or replace function generate_retainer_payments(
-  p_contract_id uuid, p_from_month text, p_to_month text
-) returns int
+-- generate_retainer_payments (dải + số cố định) đã BỎ — retainer mỗi tháng tiền
+-- khác nhau, nhập tay theo tháng qua add_retainer_month. Drop hàm cũ nếu còn.
+drop function if exists generate_retainer_payments(uuid, text, text);
+
+-- ---------- add_retainer_month (retainer tháng — SỐ TIỀN THEO TỪNG THÁNG) -----
+-- Thêm 1 đợt cho 1 tháng với số tiền RIÊNG (retainer mỗi tháng có thể khác nhau).
+-- Không còn generator dải + retainer_amount cố định. Idempotent qua unique
+-- (contract_id, period_month): thêm lại cùng tháng → cập nhật amount nếu đợt draft.
+create or replace function add_retainer_month(
+  p_contract_id uuid, p_month text, p_amount numeric
+) returns uuid
 language plpgsql security definer set search_path = public as $$
-declare v_amount numeric; v_model text;
-        v_fy int; v_fm int; v_ty int; v_tm int; v_y int; v_m int; v_key text; v_n int := 0;
+declare v_model text; v_id uuid; v_status text;
 begin
-  select retainer_amount, payment_model into v_amount, v_model from contracts where id = p_contract_id;
-  if not found then raise exception 'generate_retainer: contract không tồn tại'; end if;
-  if v_model <> 'monthly_retainer' then raise exception 'generate_retainer: contract không phải monthly_retainer'; end if;
-  if v_amount is null or v_amount <= 0 then raise exception 'generate_retainer: retainer_amount phải > 0'; end if;
+  select payment_model into v_model from contracts where id = p_contract_id;
+  if not found then raise exception 'add_retainer_month: contract không tồn tại'; end if;
+  if v_model <> 'monthly_retainer' then raise exception 'add_retainer_month: contract không phải retainer'; end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'add_retainer_month: số tiền phải > 0'; end if;
+  perform ensure_month(p_month);
 
-  -- parse 'T7/26' → year/month cho cả hai đầu.
-  v_fm := split_part(replace(p_from_month,'T',''), '/', 1)::int;
-  v_fy := 2000 + split_part(p_from_month, '/', 2)::int;
-  v_tm := split_part(replace(p_to_month,'T',''), '/', 1)::int;
-  v_ty := 2000 + split_part(p_to_month, '/', 2)::int;
-  if (v_fy*100 + v_fm) > (v_ty*100 + v_tm) then raise exception 'generate_retainer: from > to'; end if;
+  -- đã có đợt tháng này? draft → cập nhật amount; billed/received → chặn.
+  select id, status into v_id, v_status from payments
+   where contract_id = p_contract_id and period_month = p_month for update;
+  if found then
+    if v_status <> 'draft' then raise exception 'add_retainer_month: tháng % đã bill/thu', p_month; end if;
+    update payments set amount = p_amount, name = p_month where id = v_id;
+    return v_id;
+  end if;
 
-  v_y := v_fy; v_m := v_fm;
-  while (v_y*100 + v_m) <= (v_ty*100 + v_tm) loop
-    v_key := 'T' || v_m || '/' || lpad((v_y - 2000)::text, 2, '0');
-    perform ensure_month(v_key);  -- tạo tháng nếu chưa có → không bỏ sót đợt
-    insert into payments(contract_id, kind, name, amount, period_month, status, sort)
-    values (p_contract_id, 'monthly', v_key, v_amount, v_key, 'draft', 0)
-    on conflict (contract_id, period_month) where period_month is not null do nothing;
-    if found then v_n := v_n + 1; end if;
-    -- tháng kế
-    if v_m = 12 then v_m := 1; v_y := v_y + 1; else v_m := v_m + 1; end if;
-  end loop;
-  return v_n;
+  insert into payments(contract_id, kind, name, amount, period_month, status, sort)
+  values (p_contract_id, 'monthly', p_month, p_amount, p_month, 'draft', 0)
+  returning id into v_id;
+  return v_id;
 end $$;

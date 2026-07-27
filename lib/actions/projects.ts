@@ -219,13 +219,13 @@ export async function setPaymentDueOn(id: string, dueOn: string | null) {
   });
 }
 
-/** Sinh đợt retainer tháng cho dải [from..to] (idempotent). */
-export async function generateRetainerPayments(contractId: string, fromMonth: string, toMonth: string) {
+/** Thêm 1 đợt retainer cho 1 tháng với số tiền RIÊNG (mỗi tháng có thể khác nhau). */
+export async function addRetainerMonth(contractId: string, month: string, amount: number) {
   const sb = await createClient();
-  const { error } = await sb.rpc("generate_retainer_payments", {
+  const { error } = await sb.rpc("add_retainer_month", {
     p_contract_id: contractId,
-    p_from_month: fromMonth,
-    p_to_month: toMonth,
+    p_month: month,
+    p_amount: amount,
   });
   if (error) return { ok: false, error: error.message };
   rev();

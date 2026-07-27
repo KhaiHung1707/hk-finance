@@ -8,6 +8,7 @@ import { Field, Select, TextInput } from "@/components/ui/Field";
 import { DueDateButton } from "@/components/ui/DueDateButton";
 import {
   createPayment,
+  addRetainerMonth,
   billPayment,
   collectPayment,
   cancelPayment,
@@ -21,7 +22,7 @@ export const MODELS: { v: PaymentModel; label: string; hint: string }[] = [
   { v: "fixed_milestones", label: "Milestone (dự án)", hint: "nhiều đợt cố định" },
   { v: "one_shot", label: "Fixed (1 lần)", hint: "1 khoản duy nhất" },
   { v: "hourly_weekly", label: "Hourly (theo tuần)", hint: "giờ × rate mỗi tuần" },
-  { v: "monthly_retainer", label: "Retainer (tháng)", hint: "khoản cố định hàng tháng" },
+  { v: "monthly_retainer", label: "Retainer (tháng)", hint: "khoản theo từng tháng" },
 ];
 export const modelLabel = (m: PaymentModel) => MODELS.find((x) => x.v === m)?.label ?? m;
 export const modelIcon = (m: PaymentModel) =>
@@ -97,6 +98,7 @@ export function PaymentRows({
   const [pAmount, setPAmount] = useState("");
   const [pHours, setPHours] = useState("");
   const [pWeekStart, setPWeekStart] = useState("");
+  const [pMonth, setPMonth] = useState(monthKey); // retainer: tháng của đợt
   const [busy, setBusy] = useState(false);
 
   const [collect, setCollect] = useState<{ id: string; label: string; amountVnd: number } | null>(null);
@@ -122,6 +124,11 @@ export function PaymentRows({
         name: pName || (pWeekStart ? `Tuần ${pWeekStart}` : "Tuần"),
         hours: Number(pHours), periodStart: pWeekStart || null, periodEnd: end,
       });
+    } else if (c.payment_model === "monthly_retainer") {
+      // retainer: mỗi tháng số tiền riêng — idempotent theo tháng (add_retainer_month).
+      if (!pMonth) { setBusy(false); return alert("Nhập tháng (vd T8/26)"); }
+      if (!pAmount) { setBusy(false); return alert("Nhập số tiền"); }
+      res = await addRetainerMonth(c.id, pMonth.trim(), Number(pAmount));
     } else {
       if (!pAmount) { setBusy(false); return alert("Nhập số tiền"); }
       res = await createPayment({
@@ -149,7 +156,8 @@ export function PaymentRows({
     return { primary: ccy(amt, c.currency), secondary: null as string | null, vnd };
   }
 
-  const showAdd = c.status !== "done" && c.status !== "cancelled" && c.payment_model !== "monthly_retainer";
+  // Thêm đợt cho mọi model (retainer giờ cũng nhập tay theo tháng). Chỉ chặn khi HĐ đóng.
+  const showAdd = c.status !== "done" && c.status !== "cancelled";
 
   return (
     <div className={variant === "detail" ? "" : "mt-4"}>
@@ -230,21 +238,29 @@ export function PaymentRows({
         <div className="mt-3">
           {addOpen ? (
             <div className="flex items-center gap-2 flex-wrap bg-fill-soft rounded-[12px] p-2">
-              <TextInput value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Tên đợt" className="max-w-[140px]" />
-              {c.payment_model === "hourly_weekly" ? (
+              {c.payment_model === "monthly_retainer" ? (
                 <>
+                  <TextInput value={pMonth} onChange={(e) => setPMonth(e.target.value)} placeholder="T8/26" className="max-w-[90px]" />
+                  <TextInput type="number" value={pAmount} onChange={(e) => setPAmount(e.target.value)} placeholder={`${c.currency}/tháng`} className="max-w-[130px]" />
+                </>
+              ) : c.payment_model === "hourly_weekly" ? (
+                <>
+                  <TextInput value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Tên đợt" className="max-w-[140px]" />
                   <TextInput type="date" value={pWeekStart} onChange={(e) => setPWeekStart(e.target.value)} className="max-w-[150px]" />
                   <TextInput type="number" value={pHours} onChange={(e) => setPHours(e.target.value)} placeholder="Giờ" className="max-w-[90px]" />
                 </>
               ) : (
-                <TextInput type="number" value={pAmount} onChange={(e) => setPAmount(e.target.value)} placeholder={upwork ? "USD" : c.currency} className="max-w-[120px]" />
+                <>
+                  <TextInput value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Tên đợt" className="max-w-[140px]" />
+                  <TextInput type="number" value={pAmount} onChange={(e) => setPAmount(e.target.value)} placeholder={upwork ? "USD" : c.currency} className="max-w-[120px]" />
+                </>
               )}
               <Button variant="primary" onClick={addPayment} disabled={busy}>+ Thêm</Button>
               <Button variant="ghost" onClick={() => setAddOpen(false)}>Đóng</Button>
             </div>
           ) : (
-            <Button variant="ghost" onClick={() => { setAddOpen(true); setPName(""); setPAmount(""); setPHours(""); setPWeekStart(""); }}>
-              {c.payment_model === "hourly_weekly" ? "+ Thêm đợt tuần" : c.payment_model === "fixed_milestones" ? "+ Thêm milestone" : "+ Thêm khoản"}
+            <Button variant="ghost" onClick={() => { setAddOpen(true); setPName(""); setPAmount(""); setPHours(""); setPWeekStart(""); setPMonth(monthKey); }}>
+              {c.payment_model === "hourly_weekly" ? "+ Thêm đợt tuần" : c.payment_model === "monthly_retainer" ? "+ Thêm đợt tháng" : c.payment_model === "fixed_milestones" ? "+ Thêm milestone" : "+ Thêm khoản"}
             </Button>
           )}
         </div>
