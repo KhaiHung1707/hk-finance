@@ -577,10 +577,11 @@ begin
       update transactions set status = 'pending', account_id = null, received_at = null where id = v_tx;
       update payments set status = 'billed', received_on = null where id = p_ref_id;
     elsif v_status = 'billed' then
-      -- billed → draft: xoá tx pending, gỡ fx/amount đã khoá.
-      if v_tx is not null then delete from transactions where id = v_tx; end if;
+      -- billed → draft: GỠ income_tx_id TRƯỚC (tránh vi phạm FK payments→transactions),
+      -- rồi mới xoá tx pending + gỡ fx/amount đã khoá.
       update payments set status = 'draft', fx_rate = null, amount_vnd = null, gross_vnd = null,
         income_tx_id = null, billed_on = null where id = p_ref_id;
+      if v_tx is not null then delete from transactions where id = v_tx; end if;
     else
       raise exception 'rollback_status: không lùi được từ trạng thái %', v_status;
     end if;
