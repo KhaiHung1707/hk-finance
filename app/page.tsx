@@ -4,6 +4,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { MoneyText } from "@/components/ui/MoneyText";
 import { Badge } from "@/components/ui/Badge";
 import { NetWorthChart } from "@/components/forecast/NetWorthChart";
+import { Sparkline } from "@/components/ui/Sparkline";
 import { DashboardForecast } from "@/components/dashboard/DashboardForecast";
 import { ReceivablesCard } from "@/components/dashboard/ReceivablesCard";
 import { CloseMonthButton } from "@/components/dashboard/CloseMonthButton";
@@ -19,7 +20,10 @@ import {
   getProfile,
   getAccountsRef,
   getMonthCloseStatus,
+  getNetworthHistory,
+  getNetworthDeltas,
 } from "@/lib/queries";
+import { MoMInsight } from "@/components/dashboard/MoMInsight";
 import { getForecastParams, getForecastStart, getForecastSnapshots } from "@/lib/queries/forecast";
 import { getHouseGoal } from "@/lib/queries/settings";
 import { runForecast } from "@/lib/forecast";
@@ -35,7 +39,7 @@ const ALLOC_META: Record<string, { label: string; color: string }> = {
 
 export default async function DashboardPage() {
   const monthKey = await getBaselineMonthKey();
-  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, snapshots, closeStatus, houseGoal] =
+  const [balances, summary, receivables, netWorth, allocation, profile, accountsRef, fcParams, fcStart, snapshots, closeStatus, houseGoal, nwHistory, nwDeltas] =
     await Promise.all([
       getAccountBalances(),
       getMonthlySummary(monthKey),
@@ -49,7 +53,17 @@ export default async function DashboardPage() {
       getForecastSnapshots(),
       getMonthCloseStatus(monthKey),
       getHouseGoal(),
+      getNetworthHistory(), // snapshot đã chốt (cũ→mới) — MoM + sparkline
+      getNetworthDeltas(),  // phân rã Δ theo tháng — insight "vì sao"
     ]);
+
+  // --- MoM: net worth LIVE vs lần chốt gần nhất (nhãn trung thực, khác "tháng trước") ---
+  const lastSnap = nwHistory.length ? nwHistory[nwHistory.length - 1] : null;
+  const momLive =
+    lastSnap && lastSnap.total > 0 ? ((netWorth.total - lastSnap.total) / lastSnap.total) * 100 : null;
+  const nwSparkline = nwHistory.map((h) => h.total); // quỹ đạo net worth đã chốt
+  // Dòng deltas mới nhất có opening (MoM giữa 2 tháng đã chốt — dùng cho card "vì sao")
+  const lastDelta = [...nwDeltas].reverse().find((d) => d.opening != null) ?? null;
 
   // Mini-forecast: base scenario, 12 tháng — cùng engine với trang Forecast.
   const fc = runForecast(fcParams, fcStart, "base", 12);
@@ -103,6 +117,25 @@ export default async function DashboardPage() {
           <div className="text-[12px] text-[#BCD8CC] mt-[6px]">
             Cash {fmt(netWorth.cash)} · Gold {fmt(netWorth.gold)} · Stock {fmt(netWorth.stock)} · Deposits {fmt(netWorth.deposits)}
           </div>
+          {/* Badge %MoM (live vs lần chốt gần nhất) + sparkline quỹ đạo */}
+          {momLive != null && lastSnap && (
+            <div className="flex items-center gap-3 mt-3">
+              <span
+                className="inline-flex items-center gap-[5px] text-[13px] font-extrabold rounded-full px-[11px] py-[4px]"
+                style={{ background: "rgba(255,255,255,0.12)", color: momLive >= 0 ? "#7FE0B0" : "#F2A88C" }}
+                title={`${momLive >= 0 ? "+" : ""}${full(netWorth.total - lastSnap.total)} so lần chốt ${lastSnap.month_key}`}
+              >
+                <i className={`ph-fill ${momLive >= 0 ? "ph-caret-up" : "ph-caret-down"}`} aria-hidden />
+                {momLive >= 0 ? "+" : ""}{momLive.toFixed(1)}%
+              </span>
+              <span className="text-[11px] text-[#9DC4B5]">so lần chốt gần nhất ({lastSnap.month_key})</span>
+              {nwSparkline.length >= 2 && (
+                <div className="w-[110px]">
+                  <Sparkline values={nwSparkline} color="#7FCBAE" height={30} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-end gap-6 flex-wrap">
           <div>
@@ -339,6 +372,9 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Vì sao net worth tăng/giảm (chỉ khi ≥2 tháng đã chốt) */}
+      {lastDelta && <MoMInsight delta={lastDelta} />}
 
       {/* Forecast island — Horizon/Scenario · KPI · Revenue · Asset-class growth */}
       <DashboardForecast params={fcParams} start={fcStart} />

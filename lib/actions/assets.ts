@@ -80,6 +80,53 @@ export async function updatePrice(assetKey: string, price: number) {
     const { error } = await sb.rpc("update_price", { p_asset_key: assetKey, p_price: p });
     if (error) return { ok: false, error: error.message };
     rev();
+    revalidatePath("/investments");
     return { ok: true };
   });
+}
+
+/** Lấy giá close mới nhất 1 mã HOSE từ VNDirect dchart (đơn vị nghìn đồng → ×1000). */
+async function fetchVndirectPrice(symbol: string): Promise<number | null> {
+  const to = Math.floor(Date.now() / 1000);
+  const from = to - 20 * 86400; // ~20 ngày để chắc có phiên gần nhất
+  const url = `https://dchart-api.vndirect.com.vn/dchart/history?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${to}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000), cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { s?: string; c?: number[] };
+    if (data.s !== "ok" || !data.c?.length) return null;
+    const close = data.c[data.c.length - 1]; // nghìn đồng
+    if (!Number.isFinite(close) || close <= 0) return null;
+    return Math.round(close * 1000); // → VND/cp, khớp market_prices
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cập nhật giá MỌI mã cổ phiếu từ VNDirect (vàng giữ nhập tay). Chạy server-side
+ * (tránh CORS). Fail mềm từng mã — giữ giá cũ nếu API lỗi. Trả số mã cập nhật + mã lỗi.
+ */
+export async function refreshStockPrices(): Promise<{ ok: boolean; error?: string; updated?: string[]; failed?: string[] }> {
+  const sb = await createClient();
+  // mã cổ phiếu = ticker khác 'gold_ring'
+  const { data: tks, error: e1 } = await sb.from("tickers").select("symbol").neq("symbol", "gold_ring");
+  if (e1) return { ok: false, error: e1.message };
+  const symbols = (tks ?? []).map((t) => t.symbol as string);
+  if (symbols.length === 0) return { ok: true, updated: [], failed: [] };
+
+  const updated: string[] = [];
+  const failed: string[] = [];
+  await Promise.all(
+    symbols.map(async (sym) => {
+      const price = await fetchVndirectPrice(sym);
+      if (price == null) { failed.push(sym); return; }
+      const { error } = await sb.rpc("update_price", { p_asset_key: sym, p_price: price });
+      if (error) failed.push(sym);
+      else updated.push(sym);
+    })
+  );
+  rev();
+  revalidatePath("/investments");
+  return { ok: true, updated, failed };
 }

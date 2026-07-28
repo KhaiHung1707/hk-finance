@@ -22,7 +22,7 @@ import {
   deleteStockTrade,
   deleteDividend,
 } from "@/lib/actions/investments";
-import { updatePrice } from "@/lib/actions/assets";
+import { updatePrice, refreshStockPrices } from "@/lib/actions/assets";
 import type { DepositPosition, StockPosition, StockHistoryRow } from "@/lib/queries/investments";
 import type { GoldLot, GoldSummary } from "@/lib/queries/assets";
 import type { Ref } from "@/lib/queries";
@@ -146,6 +146,27 @@ export function InvestmentsClient({
     <>
       {tab !== "gold" && (
         <HeaderPortal>
+          {tab === "stocks" && (
+            <button
+              onClick={() =>
+                runner.run(
+                  async () => {
+                    const r = await refreshStockPrices();
+                    return r.ok
+                      ? { ok: true, error: undefined }
+                      : { ok: false, error: r.error };
+                  },
+                  { key: "refresh-prices", ok: "Đã cập nhật giá cổ phiếu" }
+                )
+              }
+              disabled={runner.pending("refresh-prices")}
+              title="Lấy giá đóng cửa mới nhất từ VNDirect"
+              className="flex items-center gap-2 bg-white/10 text-white border border-white/25 rounded-full px-4 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-white/20 disabled:opacity-50"
+            >
+              <i className="ph-duotone ph-arrows-clockwise" aria-hidden />
+              {runner.pending("refresh-prices") ? "Đang lấy…" : "Cập nhật giá"}
+            </button>
+          )}
           <button
             onClick={() => open(tab === "stocks" ? { kind: "buy" } : { kind: "deposit" })}
             className="flex items-center gap-2 bg-white text-primary border-0 rounded-full px-5 py-[11px] text-[13px] font-bold cursor-pointer hover:bg-[#EAF4EE]"
